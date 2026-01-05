@@ -22,8 +22,13 @@ public class JwtUtil {
     // 24 hours
     private static final long JWT_EXPIRATION_MS = 24 * 60 * 60 * 1000;
 
-    // ✅ Generate signing key (HS256 requires 256-bit key)
+    // ✅ Generate signing key safely
     private Key getSigningKey() {
+        if (jwtSecret == null || jwtSecret.length() < 32) {
+            throw new IllegalStateException(
+                "JWT secret must be at least 32 characters"
+            );
+        }
         return Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8));
     }
 
@@ -34,7 +39,9 @@ public class JwtUtil {
                 .setSubject(String.valueOf(userId))
                 .claim("role", role)
                 .setIssuedAt(new Date())
-                .setExpiration(new Date(System.currentTimeMillis() + JWT_EXPIRATION_MS))
+                .setExpiration(
+                        new Date(System.currentTimeMillis() + JWT_EXPIRATION_MS)
+                )
                 .signWith(getSigningKey(), SignatureAlgorithm.HS256)
                 .compact();
     }
