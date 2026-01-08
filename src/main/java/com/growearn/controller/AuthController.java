@@ -37,7 +37,7 @@ public class AuthController {
         String email = req.get("email");
         String roleStr = req.get("role");
 
-        Role role = Role.valueOf(roleStr);
+        Role role = Role.valueOf(roleStr.toUpperCase());
 
         boolean exists =
                 userRepo.findByEmailAndRole(email, role).isPresent();
@@ -51,7 +51,7 @@ public class AuthController {
 
         String email = req.get("email");
         String password = req.get("password");
-        Role role = Role.valueOf(req.get("role"));
+        Role role = Role.valueOf(req.get("role").toUpperCase());
 
         if (userRepo.findByEmailAndRole(email, role).isPresent()) {
             return ResponseEntity
@@ -80,7 +80,7 @@ public class AuthController {
 
         String email = req.get("email");
         String password = req.get("password");
-        Role role = Role.valueOf(req.get("role"));
+        Role role = Role.valueOf(req.get("role").toUpperCase());
 
         User user = userRepo.findByEmailAndRole(email, role)
                 .orElse(null);

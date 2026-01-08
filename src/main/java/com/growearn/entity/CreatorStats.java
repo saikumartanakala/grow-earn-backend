@@ -10,56 +10,55 @@ public class CreatorStats {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false)
-    private Long creatorId; // references users.id
+    @Column(name = "creator_id", unique = true)
+    private Long creatorId;
 
-    @Column(nullable = false)
-    private int totalViews;
-
-    @Column(nullable = false)
     private int totalFollowers;
-
-    @Column(nullable = false)
-    private double totalEarnings;
+    private int totalViews;
+    private int totalLikes;
+    private int totalComments;
 
     public CreatorStats() {}
 
     public CreatorStats(Long creatorId) {
         this.creatorId = creatorId;
-        this.totalViews = 0;
-        this.totalFollowers = 0;
-        this.totalEarnings = 0.0;
     }
 
-    public Long getId() {
-        return id;
-    }
+    // ===== GETTERS & SETTERS =====
 
     public Long getCreatorId() {
         return creatorId;
-    }
-
-    public int getTotalViews() {
-        return totalViews;
     }
 
     public int getTotalFollowers() {
         return totalFollowers;
     }
 
-    public double getTotalEarnings() {
-        return totalEarnings;
+    public void setTotalFollowers(int totalFollowers) {
+        this.totalFollowers = totalFollowers;
+    }
+
+    public int getTotalViews() {
+        return totalViews;
     }
 
     public void setTotalViews(int totalViews) {
         this.totalViews = totalViews;
     }
 
-    public void setTotalFollowers(int totalFollowers) {
-        this.totalFollowers = totalFollowers;
+    public int getTotalLikes() {
+        return totalLikes;
     }
 
-    public void setTotalEarnings(double totalEarnings) {
-        this.totalEarnings = totalEarnings;
+    public void setTotalLikes(int totalLikes) {
+        this.totalLikes = totalLikes;
+    }
+
+    public int getTotalComments() {
+        return totalComments;
+    }
+
+    public void setTotalComments(int totalComments) {
+        this.totalComments = totalComments;
     }
 }

@@ -6,11 +6,11 @@ com\growearn\controller\CreatorStatsController.class
 com\growearn\controller\CampaignController.class
 com\growearn\repository\CampaignRepository.class
 com\growearn\repository\ViewerTaskRepository.class
-com\growearn\security\SecurityConfig.class
 com\growearn\service\CreatorStatsService.class
 com\growearn\entity\Role.class
 com\growearn\controller\AuthController.class
 com\growearn\repository\CreatorStatsRepository.class
+com\growearn\service\ViewerTaskService.class
 com\growearn\repository\UserRepository.class
 com\growearn\controller\TestController.class
 com\growearn\security\JwtUtil.class

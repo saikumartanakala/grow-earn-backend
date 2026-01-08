@@ -10,17 +10,29 @@ public class ViewerTask {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "campaign_id")
     private Long campaignId;
 
-    private String taskType; // SUBSCRIBE, VIEW, LIKE
-
-    private String targetLink;
-
-    private boolean completed = false;
-
+    @Column(name = "viewer_id")
     private Long viewerId;
 
-    // 🔹 GETTERS
+    @Column(name = "creator_id")
+    private Long creatorId;
+
+    @Column(name = "task_type")
+    private String taskType;
+
+    @Column(name = "completed")
+    private boolean completed;
+
+    @Column(name = "status")
+    private String status; // PENDING, COMPLETED
+
+    @Column(name = "target_link")
+    private String targetLink;
+
+    // ---------- Getters & Setters ----------
+
     public Long getId() {
         return id;
     }
@@ -29,40 +41,55 @@ public class ViewerTask {
         return campaignId;
     }
 
-    public String getTaskType() {
-        return taskType;
-    }
-
-    public String getTargetLink() {
-        return targetLink;
-    }
-
-    public boolean isCompleted() {
-        return completed;
+    public void setCampaignId(Long campaignId) {
+        this.campaignId = campaignId;
     }
 
     public Long getViewerId() {
         return viewerId;
     }
 
-    // 🔹 SETTERS (🔥 MISSING EARLIER)
-    public void setCampaignId(Long campaignId) {
-        this.campaignId = campaignId;
+    public void setViewerId(Long viewerId) {
+        this.viewerId = viewerId;
+    }
+
+    public Long getCreatorId() {
+        return creatorId;
+    }
+
+    public void setCreatorId(Long creatorId) {
+        this.creatorId = creatorId;
+    }
+
+    public String getTaskType() {
+        return taskType;
     }
 
     public void setTaskType(String taskType) {
         this.taskType = taskType;
     }
 
-    public void setTargetLink(String targetLink) {
-        this.targetLink = targetLink;
+    public boolean isCompleted() {
+        return completed;
     }
 
     public void setCompleted(boolean completed) {
         this.completed = completed;
     }
 
-    public void setViewerId(Long viewerId) {
-        this.viewerId = viewerId;
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
+    }
+
+    public String getTargetLink() {
+        return targetLink;
+    }
+
+    public void setTargetLink(String targetLink) {
+        this.targetLink = targetLink;
     }
 }

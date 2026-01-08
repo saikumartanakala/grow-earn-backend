@@ -2,6 +2,7 @@ S:\grow_earn\grow-earn-backend-java\grow-earn-backend-java\src\main\java\com\gro
 S:\grow_earn\grow-earn-backend-java\grow-earn-backend-java\src\main\java\com\growearn\repository\CreatorStatsRepository.java
 S:\grow_earn\grow-earn-backend-java\grow-earn-backend-java\src\main\java\com\growearn\security\JwtUtil.java
 S:\grow_earn\grow-earn-backend-java\grow-earn-backend-java\src\main\java\com\growearn\service\CreatorStatsService.java
+S:\grow_earn\grow-earn-backend-java\grow-earn-backend-java\src\main\java\com\growearn\service\ViewerTaskService.java
 S:\grow_earn\grow-earn-backend-java\grow-earn-backend-java\src\main\java\com\growearn\controller\AuthController.java
 S:\grow_earn\grow-earn-backend-java\grow-earn-backend-java\src\main\java\com\growearn\security\SecurityConfig.java
 S:\grow_earn\grow-earn-backend-java\grow-earn-backend-java\src\main\java\com\growearn\controller\CampaignController.java

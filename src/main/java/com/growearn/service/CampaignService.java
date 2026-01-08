@@ -1,30 +1,66 @@
 package com.growearn.service;
 
-import com.growearn.entity.Campaign;
-import com.growearn.repository.CampaignRepository;
+import com.growearn.entity.*;
+import com.growearn.repository.*;
+import jakarta.transaction.Transactional;
+import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
 
 @Service
 public class CampaignService {
 
-    private final CampaignRepository repo;
+    private final CampaignRepository campaignRepository;
+    private final UserRepository userRepository;
+    private final ViewerTaskRepository viewerTaskRepository;
 
-    public CampaignService(CampaignRepository repo) {
-        this.repo = repo;
+    public CampaignService(
+            CampaignRepository campaignRepository,
+            UserRepository userRepository,
+            ViewerTaskRepository viewerTaskRepository
+    ) {
+        this.campaignRepository = campaignRepository;
+        this.userRepository = userRepository;
+        this.viewerTaskRepository = viewerTaskRepository;
     }
 
+    @Transactional
     public Campaign createCampaign(Campaign campaign) {
 
-        double amount = 0;
+        Campaign savedCampaign = campaignRepository.save(campaign);
 
-        amount += campaign.getSubscriberGoal() * 10;
-        amount += campaign.getViewsGoal() * 0.5;
-        amount += campaign.getLikesGoal() * 1;
-        amount += campaign.getCommentsGoal() * 2;
+        List<User> viewers = userRepository.findByRole(Role.USER);
 
-        campaign.setTotalAmount(amount);
-        campaign.setStatus("IN_PROGRESS");
+        for (User viewer : viewers) {
 
-        return repo.save(campaign);
+            if (savedCampaign.getSubscriberGoal() > 0) {
+                createTask(savedCampaign, viewer, "SUBSCRIBE");
+            }
+            if (savedCampaign.getViewsGoal() > 0) {
+                createTask(savedCampaign, viewer, "VIEW");
+            }
+            if (savedCampaign.getLikesGoal() > 0) {
+                createTask(savedCampaign, viewer, "LIKE");
+            }
+            if (savedCampaign.getCommentsGoal() > 0) {
+                createTask(savedCampaign, viewer, "COMMENT");
+            }
+        }
+
+        return savedCampaign;
+    }
+
+    private void createTask(Campaign campaign, User viewer, String type) {
+
+        ViewerTask task = new ViewerTask();
+        task.setCampaignId(campaign.getId());
+        task.setCreatorId(campaign.getCreatorId());
+        task.setViewerId(viewer.getId());
+        task.setTaskType(type);
+        task.setStatus("PENDING");
+        task.setCompleted(false);
+
+        viewerTaskRepository.save(task);
     }
 }
