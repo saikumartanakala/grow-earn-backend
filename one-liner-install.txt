@@ -1,0 +1,11 @@
+# One-liner installation for Ubuntu/Debian
+# Run this single command to install all dependencies:
+
+curl -fsSL https://raw.githubusercontent.com/grow-earn/install-scripts/main/install-grow-earn-deps.sh | sudo bash
+
+# For other systems, use the provided scripts:
+# - install-dependencies.sh (Linux/macOS)
+# - install-dependencies.bat (Windows CMD)
+# - install-dependencies.ps1 (Windows PowerShell)
+
+# After installation, follow the README.md for database setup and configuration.

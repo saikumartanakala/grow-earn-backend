@@ -1,3 +1,4 @@
+
 package com.growearn.security;
 
 import org.springframework.context.annotation.Bean;
@@ -35,8 +36,12 @@ public class SecurityConfig {
                 // ✅ ALLOW TEST APIs (for testing)
                 .requestMatchers("/api/test/**").permitAll()
 
-                // ✅ ALLOW VIEWER TASKS (temporarily for testing)
-                // .requestMatchers("/api/viewer/tasks").permitAll()
+
+                // ✅ VIEWER ENDPOINTS: Only USER role
+                .requestMatchers("/api/viewer/**").hasRole("USER")
+
+                // ✅ CREATOR ENDPOINTS: Only CREATOR role
+                .requestMatchers("/api/creator/**").hasRole("CREATOR")
 
                 // 🔐 ALL OTHER APIS NEED TOKEN
                 .anyRequest().authenticated()

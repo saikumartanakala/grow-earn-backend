@@ -4,6 +4,7 @@ import com.growearn.entity.User;
 import com.growearn.entity.ViewerTask;
 import com.growearn.repository.UserRepository;
 import com.growearn.repository.ViewerTaskRepository;
+import com.growearn.repository.EarningRepository;
 import com.growearn.security.JwtUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.*;
@@ -20,52 +21,69 @@ public class ViewerDashboardController {
     private final JwtUtil jwtUtil;
     private final UserRepository userRepository;
     private final ViewerTaskRepository viewerTaskRepository;
+    private final EarningRepository earningRepository;
 
-    public ViewerDashboardController(JwtUtil jwtUtil, UserRepository userRepository, ViewerTaskRepository viewerTaskRepository) {
+    public ViewerDashboardController(JwtUtil jwtUtil, UserRepository userRepository, ViewerTaskRepository viewerTaskRepository, EarningRepository earningRepository) {
         this.jwtUtil = jwtUtil;
         this.userRepository = userRepository;
         this.viewerTaskRepository = viewerTaskRepository;
+        this.earningRepository = earningRepository;
     }
 
     @GetMapping("/dashboard")
     public Map<String, Object> getViewerDashboard(HttpServletRequest request) {
-
-        String token = request.getHeader("Authorization").substring(7);
+        String authHeader = request.getHeader("Authorization");
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            return Map.of("error", "Unauthorized");
+        }
+        String token = authHeader.substring(7);
         Long userId = jwtUtil.extractUserId(token);
-        String role = jwtUtil.extractRole(token);
 
-        // Get user info
         Optional<User> userOpt = userRepository.findById(userId);
         if (userOpt.isEmpty()) {
             return Map.of("error", "User not found");
         }
-        User user = userOpt.get();
 
-        // Get tasks data
-        List<ViewerTask> assignedTasks = viewerTaskRepository.findByViewerIdAndCompleted(userId, false);
         List<ViewerTask> completedTasks = viewerTaskRepository.findByViewerIdAndCompleted(userId, true);
-        List<ViewerTask> availableTasks = viewerTaskRepository.findAvailableTasks();
 
-        // Calculate stats
-        int totalTasksCompleted = completedTasks.size();
-        double totalEarnings = completedTasks.size() * 10.0; // Assume $10 per task for demo
+        int totalSubscriptions = (int) completedTasks.stream().filter(t -> "SUBSCRIBE".equalsIgnoreCase(t.getTaskType())).count();
+        int videoViews = (int) completedTasks.stream().filter(t -> "VIEW".equalsIgnoreCase(t.getTaskType())).count();
+        int videoLikes = (int) completedTasks.stream().filter(t -> "LIKE".equalsIgnoreCase(t.getTaskType())).count();
+        int videoComments = (int) completedTasks.stream().filter(t -> "COMMENT".equalsIgnoreCase(t.getTaskType())).count();
+        int shortViews = (int) completedTasks.stream().filter(t -> "SHORT_VIEW".equalsIgnoreCase(t.getTaskType())).count();
+        int shortLikes = (int) completedTasks.stream().filter(t -> "SHORT_LIKE".equalsIgnoreCase(t.getTaskType())).count();
+        int shortComments = (int) completedTasks.stream().filter(t -> "SHORT_COMMENT".equalsIgnoreCase(t.getTaskType())).count();
+
+        Double moneyEarnings = earningRepository.sumEarningsByViewerId(userId);
+        if (moneyEarnings == null) moneyEarnings = 0.0;
 
         return Map.of(
-                "user", Map.of(
-                        "id", user.getId(),
-                        "email", user.getEmail(),
-                        "role", user.getRole()
-                ),
-                "stats", Map.of(
-                        "totalTasksCompleted", totalTasksCompleted,
-                        "totalEarnings", totalEarnings,
-                        "assignedTasksCount", assignedTasks.size()
-                ),
-                "tasks", Map.of(
-                        "assigned", assignedTasks,
-                        "completed", completedTasks,
-                        "available", availableTasks
-                )
+            "userId", userId,
+            "totalSubscriptions", totalSubscriptions,
+            "videoViews", videoViews,
+            "videoLikes", videoLikes,
+            "videoComments", videoComments,
+            "moneyEarnings", moneyEarnings,
+            "shortViews", shortViews,
+            "shortLikes", shortLikes,
+            "shortComments", shortComments
+        );
+    }
+    @GetMapping("/earnings")
+    public Map<String, Object> getViewerEarnings(HttpServletRequest request) {
+        String authHeader = request.getHeader("Authorization");
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            return Map.of("error", "Unauthorized");
+        }
+        String token = authHeader.substring(7);
+        Long userId = jwtUtil.extractUserId(token);
+
+        Double moneyEarnings = earningRepository.sumEarningsByViewerId(userId);
+        if (moneyEarnings == null) moneyEarnings = 0.0;
+
+        return Map.of(
+            "userId", userId,
+            "moneyEarnings", moneyEarnings
         );
     }
 

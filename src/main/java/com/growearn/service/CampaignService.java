@@ -27,13 +27,11 @@ public class CampaignService {
 
     @Transactional
     public Campaign createCampaign(Campaign campaign) {
-
         Campaign savedCampaign = campaignRepository.save(campaign);
 
         List<User> viewers = userRepository.findByRole(Role.USER);
 
         for (User viewer : viewers) {
-
             if (savedCampaign.getSubscriberGoal() > 0) {
                 createTask(savedCampaign, viewer, "SUBSCRIBE");
             }
@@ -52,7 +50,6 @@ public class CampaignService {
     }
 
     private void createTask(Campaign campaign, User viewer, String type) {
-
         ViewerTask task = new ViewerTask();
         task.setCampaignId(campaign.getId());
         task.setCreatorId(campaign.getCreatorId());
@@ -61,6 +58,20 @@ public class CampaignService {
         task.setStatus("PENDING");
         task.setCompleted(false);
 
+        // Set targetLink based on task type and contentType (VIDEO/SHORT)
+        String targetLink = null;
+        String contentType = campaign.getContentType();
+        if (type.equals("SUBSCRIBE")) {
+            targetLink = campaign.getChannelLink();
+        } else if (type.equals("VIEW") || type.equals("LIKE") || type.equals("COMMENT")) {
+            // For both VIDEO and SHORT, use videoLink
+            targetLink = campaign.getVideoLink();
+        }
+        task.setTargetLink(targetLink);
+
         viewerTaskRepository.save(task);
+    }
+    public List<Campaign> getCampaignsByCreatorAndStatus(Long creatorId, String status) {
+        return campaignRepository.findByCreatorIdAndStatus(creatorId, status);
     }
 }
