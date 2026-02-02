@@ -13,8 +13,14 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.util.Map;
 import java.util.Set;
 import java.util.List;
+import java.util.HashMap;
+import java.util.ArrayList;
 
 import com.growearn.entity.Campaign;
+import com.growearn.entity.TaskEntity;
+import com.growearn.entity.ViewerTaskEntity;
+import com.growearn.repository.TaskRepository;
+import com.growearn.repository.ViewerTaskEntityRepository;
 import com.growearn.security.JwtUtil;
 import com.growearn.service.CampaignService;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -25,10 +31,15 @@ import org.springframework.security.core.context.SecurityContextHolder;
 public class CampaignController {
 
     private final CampaignService campaignService;
+    private final TaskRepository taskRepository;
+    private final ViewerTaskEntityRepository viewerTaskEntityRepository;
     private final JwtUtil jwtUtil;
 
-    public CampaignController(CampaignService campaignService, JwtUtil jwtUtil) {
+    public CampaignController(CampaignService campaignService, TaskRepository taskRepository,
+                              ViewerTaskEntityRepository viewerTaskEntityRepository, JwtUtil jwtUtil) {
         this.campaignService = campaignService;
+        this.taskRepository = taskRepository;
+        this.viewerTaskEntityRepository = viewerTaskEntityRepository;
         this.jwtUtil = jwtUtil;
     }
 
@@ -230,5 +241,161 @@ public class CampaignController {
     @GetMapping("/")
     public ResponseEntity<?> getCampaignsByStatusRootSlash(@RequestParam("status") String status) {
         return getCampaignsByStatus(status);
+    }
+
+    /**
+     * Get ALL campaigns for the creator (regardless of status).
+     * GET /api/creator/campaigns/all
+     * Returns all campaigns with task progress information.
+     */
+    @GetMapping("/all")
+    public ResponseEntity<?> getAllCampaigns(HttpServletRequest request) {
+        String auth = request.getHeader("Authorization");
+        if (auth == null || !auth.startsWith("Bearer ")) {
+            return ResponseEntity.status(401).body(Map.of("error", "Missing token"));
+        }
+        Long creatorId = jwtUtil.extractUserId(auth.substring(7));
+        
+        List<Campaign> campaigns = campaignService.getCampaignsByCreator(creatorId);
+        if (campaigns == null || campaigns.isEmpty()) {
+            return ResponseEntity.ok(Map.of("campaigns", new ArrayList<>()));
+        }
+
+        // Enrich campaigns with task progress data
+        List<Map<String, Object>> enrichedCampaigns = new ArrayList<>();
+        for (Campaign c : campaigns) {
+            Map<String, Object> map = enrichCampaignWithProgress(c);
+            enrichedCampaigns.add(map);
+        }
+
+        return ResponseEntity.ok(Map.of("campaigns", enrichedCampaigns));
+    }
+
+    /**
+     * Get campaigns with pending viewer tasks (tasks submitted but awaiting admin approval).
+     * GET /api/creator/campaigns/with-pending-tasks
+     */
+    @GetMapping("/with-pending-tasks")
+    public ResponseEntity<?> getCampaignsWithPendingTasks(HttpServletRequest request) {
+        String auth = request.getHeader("Authorization");
+        if (auth == null || !auth.startsWith("Bearer ")) {
+            return ResponseEntity.status(401).body(Map.of("error", "Missing token"));
+        }
+        Long creatorId = jwtUtil.extractUserId(auth.substring(7));
+        
+        List<Campaign> campaigns = campaignService.getCampaignsByCreator(creatorId);
+        if (campaigns == null || campaigns.isEmpty()) {
+            return ResponseEntity.ok(Map.of("campaigns", new ArrayList<>()));
+        }
+
+        // Filter campaigns that have pending verification tasks
+        List<Map<String, Object>> campaignsWithPending = new ArrayList<>();
+        for (Campaign c : campaigns) {
+            Map<String, Object> enriched = enrichCampaignWithProgress(c);
+            int pendingCount = (int) enriched.getOrDefault("pendingVerificationCount", 0);
+            if (pendingCount > 0) {
+                campaignsWithPending.add(enriched);
+            }
+        }
+
+        return ResponseEntity.ok(Map.of("campaigns", campaignsWithPending));
+    }
+
+    /**
+     * Get campaigns with completed viewer tasks (tasks approved by admin).
+     * GET /api/creator/campaigns/with-completed-tasks
+     */
+    @GetMapping("/with-completed-tasks")
+    public ResponseEntity<?> getCampaignsWithCompletedTasks(HttpServletRequest request) {
+        String auth = request.getHeader("Authorization");
+        if (auth == null || !auth.startsWith("Bearer ")) {
+            return ResponseEntity.status(401).body(Map.of("error", "Missing token"));
+        }
+        Long creatorId = jwtUtil.extractUserId(auth.substring(7));
+        
+        List<Campaign> campaigns = campaignService.getCampaignsByCreator(creatorId);
+        if (campaigns == null || campaigns.isEmpty()) {
+            return ResponseEntity.ok(Map.of("campaigns", new ArrayList<>()));
+        }
+
+        // Filter campaigns that have completed tasks
+        List<Map<String, Object>> campaignsWithCompleted = new ArrayList<>();
+        for (Campaign c : campaigns) {
+            Map<String, Object> enriched = enrichCampaignWithProgress(c);
+            int completedCount = (int) enriched.getOrDefault("completedTasksCount", 0);
+            if (completedCount > 0) {
+                campaignsWithCompleted.add(enriched);
+            }
+        }
+
+        return ResponseEntity.ok(Map.of("campaigns", campaignsWithCompleted));
+    }
+
+    /**
+     * Helper method to enrich a campaign with task progress information.
+     */
+    private Map<String, Object> enrichCampaignWithProgress(Campaign c) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("id", c.getId());
+        map.put("title", c.getTitle() != null ? c.getTitle() : "");
+        map.put("description", c.getDescription() != null ? c.getDescription() : "");
+        map.put("goalType", c.getGoalType());
+        map.put("platform", c.getPlatform());
+        map.put("channelName", c.getChannelName());
+        map.put("channelLink", c.getChannelLink());
+        map.put("contentType", c.getContentType());
+        map.put("videoLink", c.getVideoLink());
+        map.put("videoDuration", c.getVideoDuration());
+        map.put("subscriberGoal", c.getSubscriberGoal());
+        map.put("viewsGoal", c.getViewsGoal());
+        map.put("likesGoal", c.getLikesGoal());
+        map.put("commentsGoal", c.getCommentsGoal());
+        map.put("currentSubscribers", c.getCurrentSubscribers());
+        map.put("currentViews", c.getCurrentViews());
+        map.put("currentLikes", c.getCurrentLikes());
+        map.put("currentComments", c.getCurrentComments());
+        map.put("totalAmount", c.getTotalAmount());
+        map.put("goalAmount", c.getGoalAmount());
+        map.put("currentAmount", c.getCurrentAmount());
+        map.put("status", c.getStatus() != null ? c.getStatus() : "IN_PROGRESS");
+        map.put("updatedAt", c.getUpdatedAt() != null ? c.getUpdatedAt().toString() : java.time.LocalDateTime.now().toString());
+
+        // Get task counts for this campaign
+        List<TaskEntity> tasks = taskRepository.findByCampaignIdIn(List.of(c.getId()));
+        int totalTasks = tasks.size();
+        int openTasks = 0;
+        int underVerification = 0;
+        int completedTasks = 0;
+
+        if (!tasks.isEmpty()) {
+            List<Long> taskIds = tasks.stream().map(TaskEntity::getId).toList();
+            
+            // Count viewer tasks by status
+            List<ViewerTaskEntity> pendingViewerTasks = viewerTaskEntityRepository.findByTaskIdInAndStatus(taskIds, "UNDER_VERIFICATION");
+            List<ViewerTaskEntity> completedViewerTasks = viewerTaskEntityRepository.findByTaskIdInAndStatus(taskIds, "COMPLETED");
+            
+            underVerification = pendingViewerTasks.size();
+            completedTasks = completedViewerTasks.size();
+            
+            // Count open tasks
+            for (TaskEntity t : tasks) {
+                if ("OPEN".equalsIgnoreCase(t.getStatus())) {
+                    openTasks++;
+                }
+            }
+        }
+
+        map.put("totalTasks", totalTasks);
+        map.put("openTasksCount", openTasks);
+        map.put("pendingVerificationCount", underVerification);
+        map.put("completedTasksCount", completedTasks);
+        
+        // Calculate progress percentage
+        int totalGoals = c.getSubscriberGoal() + c.getViewsGoal() + c.getLikesGoal() + c.getCommentsGoal();
+        int currentProgress = c.getCurrentSubscribers() + c.getCurrentViews() + c.getCurrentLikes() + c.getCurrentComments();
+        double progressPercent = totalGoals > 0 ? (currentProgress * 100.0 / totalGoals) : 0;
+        map.put("progressPercent", Math.min(100, progressPercent));
+
+        return map;
     }
 }

@@ -17,4 +17,10 @@ public interface ViewerTaskEntityRepository extends JpaRepository<ViewerTaskEnti
     
     // Find tasks by viewer and status
     List<ViewerTaskEntity> findByViewerIdAndStatus(Long viewerId, String status);
+    
+    // Find viewer tasks by task IDs and status (for creator to see tasks related to their campaigns)
+    List<ViewerTaskEntity> findByTaskIdInAndStatus(List<Long> taskIds, String status);
+    
+    // Find viewer tasks by task IDs (all statuses)
+    List<ViewerTaskEntity> findByTaskIdIn(List<Long> taskIds);
 }

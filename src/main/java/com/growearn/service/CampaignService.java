@@ -66,6 +66,11 @@ public class CampaignService {
         return campaignRepository.findByCreatorIdAndStatus(creatorId, status);
     }
 
+    // Get all campaigns by creator id (any status)
+    public List<Campaign> getCampaignsByCreator(Long creatorId) {
+        return campaignRepository.findByCreatorId(creatorId);
+    }
+
     // Expose repository method so controllers can fetch campaigns by creator id
     public List<Campaign> findByCreatorId(Long creatorId) {
         return campaignRepository.findByCreatorId(creatorId);

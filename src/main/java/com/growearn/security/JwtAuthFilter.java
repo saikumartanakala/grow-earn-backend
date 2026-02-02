@@ -1,85 +1,69 @@
 package com.growearn.security;
 
 import com.growearn.entity.AccountStatus;
-import com.growearn.entity.RevokedToken;
 import com.growearn.entity.User;
-import com.growearn.repository.RevokedTokenRepository;
+import com.growearn.entity.RevokedToken;
 import com.growearn.repository.UserRepository;
+import com.growearn.repository.RevokedTokenRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-
-import org.springframework.lang.NonNull;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
-
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
-import org.springframework.stereotype.Component;
-
 @Component
 public class JwtAuthFilter extends OncePerRequestFilter {
-
+    private final UserRepository userRepository;
     private final JwtUtil jwtUtil;
     private final RevokedTokenRepository revokedTokenRepository;
-    private final UserRepository userRepository;
 
-    public JwtAuthFilter(JwtUtil jwtUtil, 
-                        RevokedTokenRepository revokedTokenRepository,
-                        UserRepository userRepository) {
+    /**
+     * Extract JWT token from Authorization header
+     */
+    private String getTokenFromRequest(HttpServletRequest request) {
+        String authHeader = request.getHeader("Authorization");
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            return authHeader.substring(7);
+        }
+        return null;
+    }
+
+    public JwtAuthFilter(UserRepository userRepository, JwtUtil jwtUtil, RevokedTokenRepository revokedTokenRepository) {
+        this.userRepository = userRepository;
         this.jwtUtil = jwtUtil;
         this.revokedTokenRepository = revokedTokenRepository;
-        this.userRepository = userRepository;
     }
 
     @Override
-    protected void doFilterInternal(
-            @NonNull HttpServletRequest request,
-            @NonNull HttpServletResponse response,
-            @NonNull FilterChain filterChain
-    ) throws ServletException, IOException {
-
-        String path = request.getRequestURI();
-
-        // Allow unauthenticated access to auth endpoints
-        if (path.startsWith("/api/auth/")) {
-            filterChain.doFilter(request, response);
-            return;
-        }
-
-        String authHeader = request.getHeader("Authorization");
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            // No token present — do not set authentication; let Spring handle access control
-            filterChain.doFilter(request, response);
-            return;
-        }
-
-        String token = authHeader.substring(7);
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
         try {
-            if (!jwtUtil.validateToken(token)) {
+            String token = getTokenFromRequest(request);
+            System.out.println("[JwtAuthFilter] Incoming request URI: " + request.getRequestURI());
+            System.out.println("[JwtAuthFilter] Raw token: " + (token != null ? token : "<none>"));
+            if (token == null) {
                 filterChain.doFilter(request, response);
                 return;
             }
 
-            // Check if token is revoked
             if (isTokenRevoked(token)) {
-                System.out.println("[JwtAuthFilter] Token is revoked");
-                sendUnauthorizedResponse(response, "Token has been revoked. Please login again.");
+                System.out.println("[JwtAuthFilter] Token revoked");
+                sendUnauthorizedResponse(response, "Token has been revoked");
                 return;
             }
 
             Long userId = jwtUtil.extractUserId(token);
             String role = jwtUtil.extractRole(token);
-            if (role == null || role.isBlank()) {
-                filterChain.doFilter(request, response);
-                return;
-            }
+            System.out.println("[JwtAuthFilter] Extracted userId: " + userId);
+            System.out.println("[JwtAuthFilter] Extracted role: " + role);
 
             // Check user status (suspended/banned)
             Optional<User> userOpt = userRepository.findById(userId);
@@ -90,13 +74,15 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             }
 
             User user = userOpt.get();
-            
+            System.out.println("[JwtAuthFilter] DB user role: " + (user.getRole() != null ? user.getRole().name() : "<none>"));
+            System.out.println("[JwtAuthFilter] DB user status: " + (user.getStatus() != null ? user.getStatus().name() : "<none>"));
+
             // Handle NULL status as ACTIVE (for existing users before migration)
             AccountStatus status = user.getStatus();
             if (status == null) {
                 status = AccountStatus.ACTIVE;
             }
-            
+
             // Check if user is banned
             if (status == AccountStatus.BANNED) {
                 System.out.println("[JwtAuthFilter] User is banned: " + userId);
@@ -123,7 +109,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             }
 
             // Normalize role values: accept synonyms and ensure Spring Security `ROLE_` prefix
-            String raw = role.toUpperCase().trim();
+            String raw = role != null ? role.toUpperCase().trim() : "<none>";
             // Map common synonyms to canonical roles
             String mapped;
             switch (raw) {
@@ -139,8 +125,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             String principal = String.valueOf(userId);
             UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(principal, null, authorities);
             try {
-                // set details so downstream code can inspect remote IP / session if needed
-                org.springframework.security.web.authentication.WebAuthenticationDetailsSource src = new org.springframework.security.web.authentication.WebAuthenticationDetailsSource();
+                WebAuthenticationDetailsSource src = new WebAuthenticationDetailsSource();
                 authentication.setDetails(src.buildDetails(request));
             } catch (Exception ignored) {}
             SecurityContextHolder.getContext().setAuthentication(authentication);
@@ -148,12 +133,12 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             // Log accepted token principal & role for debugging (no token value)
             System.out.println("[JwtAuthFilter] Accepted token for userId=" + principal + " role=" + mapped);
         } catch (Exception ex) {
-            // On any exception, do not set authentication and continue — Spring Security will deny access if required
             System.out.println("[JwtAuthFilter] Exception processing token: " + ex.getMessage());
         }
-
         filterChain.doFilter(request, response);
     }
+
+    // ...existing code for isTokenRevoked, sendUnauthorizedResponse, sendForbiddenResponse...
 
     /**
      * Check if a token is revoked

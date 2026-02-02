@@ -203,39 +203,6 @@ public class AdminUserController {
         }
     }
 
-    /**
-     * POST /api/admin/users/reset-password
-     * Reset a user's password
-     */
-    @PostMapping("/reset-password")
-    public ResponseEntity<?> resetPassword(@RequestBody Map<String, Object> body, HttpServletRequest req) {
-        Long adminId = extractAdminId(req);
-        Long userId = extractUserId(body);
-        String newPassword = body.containsKey("newPassword") ? String.valueOf(body.get("newPassword")) : null;
-        
-        if (userId == null) {
-            return ResponseEntity.badRequest()
-                .body(Map.of("success", false, "message", "userId is required"));
-        }
-        
-        if (newPassword == null || newPassword.length() < 6) {
-            return ResponseEntity.badRequest()
-                .body(Map.of("success", false, "message", "newPassword must be at least 6 characters"));
-        }
-
-        try {
-            userService.resetPassword(userId, newPassword);
-            userService.forceLogout(userId, adminId, "Password reset by admin");
-            logger.info("Admin {} reset password for user {}", adminId, userId);
-            return ResponseEntity.ok(Map.of(
-                "success", true,
-                "message", "Password reset successfully. User will need to login again."
-            ));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest()
-                .body(Map.of("success", false, "message", e.getMessage()));
-        }
-    }
 
     /**
      * POST /api/admin/users/verify-creator
@@ -293,29 +260,190 @@ public class AdminUserController {
         }
     }
 
-    /**
-     * POST /api/admin/users/force-logout
-     * Force logout a user by revoking all their tokens
-     */
-    @PostMapping("/force-logout")
-    public ResponseEntity<?> forceLogout(@RequestBody Map<String, Object> body, HttpServletRequest req) {
-        Long adminId = extractAdminId(req);
-        Long userId = extractUserId(body);
-        String reason = body.containsKey("reason") ? String.valueOf(body.get("reason")) : "Forced logout by admin";
-        
-        if (userId == null) {
-            return ResponseEntity.badRequest()
-                .body(Map.of("success", false, "message", "userId is required"));
+        /**
+         * POST /api/admin/users/{id}/verify
+         * Verify a creator account by user ID (for frontend compatibility)
+         */
+        @PostMapping("/{id}/verify")
+        public ResponseEntity<?> verifyCreatorById(@PathVariable Long id, HttpServletRequest req) {
+            Long adminId = extractAdminId(req);
+            try {
+                User user = userService.verifyCreator(id);
+                logger.info("Admin {} verified creator {} via /{id}/verify", adminId, id);
+                return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", "Creator verified successfully",
+                    "user", userToMap(user)
+                ));
+            } catch (Exception e) {
+                logger.error("Failed to verify creator {}: {}", id, e.getMessage());
+                return ResponseEntity.badRequest()
+                    .body(Map.of("success", false, "message", e.getMessage()));
+            }
         }
 
+
+    /**
+     * POST /api/admin/users/{id}/unverify
+     * Unverify a creator account by user ID
+     */
+    @PostMapping("/{id}/unverify")
+    public ResponseEntity<?> unverifyCreatorById(@PathVariable Long id, HttpServletRequest req) {
+        Long adminId = extractAdminId(req);
         try {
-            userService.forceLogout(userId, adminId, reason);
-            logger.info("Admin {} forced logout for user {}", adminId, userId);
+            User user = userService.unverifyCreator(id);
+            logger.info("Admin {} unverified creator {} via /{id}/unverify", adminId, id);
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "Creator verification removed",
+                "user", userToMap(user)
+            ));
+        } catch (Exception e) {
+            logger.error("Failed to unverify creator {}: {}", id, e.getMessage());
+            return ResponseEntity.badRequest()
+                .body(Map.of("success", false, "message", e.getMessage()));
+        }
+    }
+
+    /**
+     * POST /api/admin/users/{id}/suspend
+     * Suspend a user by ID (default 7 days, can be extended with ?days=)
+     */
+    @PostMapping("/{id}/suspend")
+    public ResponseEntity<?> suspendUserById(@PathVariable Long id, @RequestParam(value = "days", required = false) Integer days, HttpServletRequest req) {
+        Long adminId = extractAdminId(req);
+        int suspendDays = (days != null) ? days : 7;
+        String reason = "Policy violation";
+        try {
+            User user = userService.suspendUser(id, suspendDays, reason);
+            userService.forceLogout(id, adminId, "Account suspended: " + reason);
+            logger.info("Admin {} suspended user {} for {} days via /{id}/suspend", adminId, id, suspendDays);
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "User suspended for " + suspendDays + " days",
+                "suspensionUntil", user.getSuspensionUntil() != null ? user.getSuspensionUntil().toString() : null,
+                "user", userToMap(user)
+            ));
+        } catch (Exception e) {
+            logger.error("Failed to suspend user {}: {}", id, e.getMessage());
+            return ResponseEntity.badRequest()
+                .body(Map.of("success", false, "message", e.getMessage()));
+        }
+    }
+
+    /**
+     * POST /api/admin/users/{id}/ban
+     * Permanently ban a user by ID
+     */
+    @PostMapping("/{id}/ban")
+    public ResponseEntity<?> banUserById(@PathVariable Long id, HttpServletRequest req) {
+        Long adminId = extractAdminId(req);
+        String reason = "Severe policy violation";
+        try {
+            User user = userService.banUser(id, reason);
+            userService.forceLogout(id, adminId, "Account banned: " + reason);
+            logger.info("Admin {} banned user {} via /{id}/ban", adminId, id);
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "User permanently banned",
+                "user", userToMap(user)
+            ));
+        } catch (Exception e) {
+            logger.error("Failed to ban user {}: {}", id, e.getMessage());
+            return ResponseEntity.badRequest()
+                .body(Map.of("success", false, "message", e.getMessage()));
+        }
+    }
+
+    /**
+     * POST /api/admin/users/{id}/reset-password
+     * Reset a user's password by ID (requires newPassword in body)
+     */
+    @PostMapping("/{id}/reset-password")
+    public ResponseEntity<?> resetPasswordById(@PathVariable Long id, @RequestBody Map<String, Object> body, HttpServletRequest req) {
+        Long adminId = extractAdminId(req);
+        String newPassword = body.containsKey("newPassword") ? String.valueOf(body.get("newPassword")) : null;
+        if (newPassword == null || newPassword.length() < 6) {
+            return ResponseEntity.badRequest()
+                .body(Map.of("success", false, "message", "newPassword must be at least 6 characters"));
+        }
+        try {
+            userService.resetPassword(id, newPassword);
+            userService.forceLogout(id, adminId, "Password reset by admin");
+            logger.info("Admin {} reset password for user {} via /{id}/reset-password", adminId, id);
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "Password reset successfully. User will need to login again."
+            ));
+        } catch (Exception e) {
+            logger.error("Failed to reset password for user {}: {}", id, e.getMessage());
+            return ResponseEntity.badRequest()
+                .body(Map.of("success", false, "message", e.getMessage()));
+        }
+    }
+
+    /**
+     * POST /api/admin/users/{id}/logout
+     * Force logout a user by ID
+     */
+    @PostMapping("/{id}/logout")
+    public ResponseEntity<?> forceLogoutById(@PathVariable Long id, HttpServletRequest req) {
+        Long adminId = extractAdminId(req);
+        String reason = "Forced logout by admin";
+        try {
+            userService.forceLogout(id, adminId, reason);
+            logger.info("Admin {} forced logout for user {} via /{id}/logout", adminId, id);
             return ResponseEntity.ok(Map.of(
                 "success", true,
                 "message", "User logged out successfully. All active sessions terminated."
             ));
         } catch (Exception e) {
+            logger.error("Failed to force logout user {}: {}", id, e.getMessage());
+            return ResponseEntity.badRequest()
+                .body(Map.of("success", false, "message", e.getMessage()));
+        }
+    }
+
+    /**
+     * POST /api/admin/users/{id}/activate
+     * Activate a user account by ID
+     */
+    @PostMapping("/{id}/activate")
+    public ResponseEntity<?> activateUserById(@PathVariable Long id, HttpServletRequest req) {
+        Long adminId = extractAdminId(req);
+        try {
+            User user = userService.activateUser(id);
+            logger.info("Admin {} activated user {} via /{id}/activate", adminId, id);
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "User activated successfully",
+                "user", userToMap(user)
+            ));
+        } catch (Exception e) {
+            logger.error("Failed to activate user {}: {}", id, e.getMessage());
+            return ResponseEntity.badRequest()
+                .body(Map.of("success", false, "message", e.getMessage()));
+        }
+    }
+
+
+    /**
+     * POST /api/admin/users/{id}/logout
+     * Force logout a user by ID (duplicate for compatibility)
+     */
+    @PostMapping("/{id}/logout-path")
+    public ResponseEntity<?> forceLogoutByIdPath(@PathVariable Long id, HttpServletRequest req) {
+        Long adminId = extractAdminId(req);
+        String reason = "Forced logout by admin";
+        try {
+            userService.forceLogout(id, adminId, reason);
+            logger.info("Admin {} forced logout for user {} via /{id}/logout-path", adminId, id);
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "User logged out successfully. All active sessions terminated."
+            ));
+        } catch (Exception e) {
+            logger.error("Failed to force logout user {}: {}", id, e.getMessage());
             return ResponseEntity.badRequest()
                 .body(Map.of("success", false, "message", e.getMessage()));
         }
