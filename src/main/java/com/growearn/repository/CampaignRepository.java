@@ -9,4 +9,6 @@ public interface CampaignRepository extends JpaRepository<Campaign, Long> {
     List<Campaign> findByCreatorId(Long creatorId);
     List<Campaign> findByCreatorIdAndStatus(Long creatorId, String status);
     List<Campaign> findByStatus(String status);
+
+    long countByStatus(String status);
 }

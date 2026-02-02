@@ -5,7 +5,7 @@ import com.growearn.entity.User;
 import com.growearn.repository.UserRepository;
 import com.growearn.repository.CampaignRepository;
 import com.growearn.repository.CreatorStatsRepository;
-import com.growearn.repository.ViewerTaskRepository;
+// legacy viewer tasks removed; new flow uses tasks + viewer_tasks entities
 import com.growearn.entity.CreatorStats;
 import com.growearn.security.JwtUtil;
 import org.springframework.http.HttpStatus;
@@ -16,7 +16,6 @@ import org.springframework.web.bind.annotation.*;
 import java.util.Map;
 import java.util.List;
 import com.growearn.entity.Campaign;
-import com.growearn.entity.ViewerTask;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -27,7 +26,6 @@ public class AuthController {
         private final JwtUtil jwtUtil;
         private final PasswordEncoder passwordEncoder;
         private final CreatorStatsRepository creatorStatsRepo;
-        private final ViewerTaskRepository viewerTaskRepo;
         private final CampaignRepository campaignRepo;
 
                 public AuthController(
@@ -35,15 +33,13 @@ public class AuthController {
                         JwtUtil jwtUtil,
                         PasswordEncoder passwordEncoder,
                         CreatorStatsRepository creatorStatsRepo,
-                        ViewerTaskRepository viewerTaskRepo,
                         CampaignRepository campaignRepo
                 ) {
                         this.userRepo = userRepo;
                         this.jwtUtil = jwtUtil;
                         this.passwordEncoder = passwordEncoder;
                         this.creatorStatsRepo = creatorStatsRepo;
-                        this.viewerTaskRepo = viewerTaskRepo;
-                        this.campaignRepo = campaignRepo;
+                            this.campaignRepo = campaignRepo;
                 }
 
     // ✅ CHECK EMAIL + ROLE (PUBLIC)
@@ -68,109 +64,108 @@ public class AuthController {
         String email = req.get("email");
         String password = req.get("password");
         Role role = Role.valueOf(req.get("role").toUpperCase());
+        
+        // Normalize VIEWER to USER for database storage (backward compatibility)
+        Role dbRole = (role == Role.VIEWER) ? Role.USER : role;
 
-        if (userRepo.findByEmailAndRole(email, role).isPresent()) {
+        // Check for duplicate email+role (check both USER and VIEWER for viewers)
+        if (userRepo.findByEmailAndRole(email, dbRole).isPresent()) {
             return ResponseEntity
-                    .badRequest()
-                    .body(Map.of("message", "Account already exists"));
+                .status(HttpStatus.CONFLICT)
+                .body(Map.of("message", "Account with this email and role already exists"));
+        }
+        // Also check the alternative role for viewers
+        if ((role == Role.VIEWER || role == Role.USER) && 
+            userRepo.findByEmailAndRole(email, role == Role.VIEWER ? Role.USER : Role.VIEWER).isPresent()) {
+            return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .body(Map.of("message", "Account with this email and role already exists"));
         }
 
         User user = new User(
                 email,
                 passwordEncoder.encode(password),
-                role
+                dbRole
         );
 
-                userRepo.save(user);
+        userRepo.save(user);
 
-                // Auto-create CreatorStats for new creators
-                if (role == Role.CREATOR) {
-                        // Only create if not exists
-                        creatorStatsRepo.findByCreatorId(user.getId())
-                                .orElseGet(() -> creatorStatsRepo.save(new CreatorStats(user.getId())));
-                }
+        // Auto-create CreatorStats for new creators
+        if (role == Role.CREATOR) {
+            // Only create if not exists
+            creatorStatsRepo.findByCreatorId(user.getId())
+                    .orElseGet(() -> creatorStatsRepo.save(new CreatorStats(user.getId())));
+        }
 
-                // Assign tasks to new viewers for all IN_PROGRESS campaigns
-                if (role == Role.USER) {
-                        List<Campaign> inProgressCampaigns = campaignRepo.findByStatus("IN_PROGRESS");
-                        for (Campaign campaign : inProgressCampaigns) {
-                                if (campaign.getSubscriberGoal() > 0) {
-                                        ViewerTask subscribeTask = new ViewerTask();
-                                        subscribeTask.setCampaignId(campaign.getId());
-                                        subscribeTask.setCreatorId(campaign.getCreatorId());
-                                        subscribeTask.setViewerId(user.getId());
-                                        subscribeTask.setTaskType("SUBSCRIBE");
-                                        subscribeTask.setStatus("PENDING");
-                                        subscribeTask.setCompleted(false);
-                                        subscribeTask.setTargetLink(campaign.getChannelLink());
-                                        viewerTaskRepo.save(subscribeTask);
-                                }
-                                if (campaign.getViewsGoal() > 0) {
-                                        ViewerTask viewTask = new ViewerTask();
-                                        viewTask.setCampaignId(campaign.getId());
-                                        viewTask.setCreatorId(campaign.getCreatorId());
-                                        viewTask.setViewerId(user.getId());
-                                        viewTask.setTaskType("VIEW");
-                                        viewTask.setStatus("PENDING");
-                                        viewTask.setCompleted(false);
-                                        viewTask.setTargetLink(campaign.getVideoLink());
-                                        viewerTaskRepo.save(viewTask);
-                                }
-                                if (campaign.getLikesGoal() > 0) {
-                                        ViewerTask likeTask = new ViewerTask();
-                                        likeTask.setCampaignId(campaign.getId());
-                                        likeTask.setCreatorId(campaign.getCreatorId());
-                                        likeTask.setViewerId(user.getId());
-                                        likeTask.setTaskType("LIKE");
-                                        likeTask.setStatus("PENDING");
-                                        likeTask.setCompleted(false);
-                                        likeTask.setTargetLink(campaign.getVideoLink());
-                                        viewerTaskRepo.save(likeTask);
-                                }
-                                if (campaign.getCommentsGoal() > 0) {
-                                        ViewerTask commentTask = new ViewerTask();
-                                        commentTask.setCampaignId(campaign.getId());
-                                        commentTask.setCreatorId(campaign.getCreatorId());
-                                        commentTask.setViewerId(user.getId());
-                                        commentTask.setTaskType("COMMENT");
-                                        commentTask.setStatus("PENDING");
-                                        commentTask.setCompleted(false);
-                                        commentTask.setTargetLink(campaign.getVideoLink());
-                                        viewerTaskRepo.save(commentTask);
-                                }
-                        }
-                }
+        // New flow: do NOT pre-assign tasks to viewers. Viewers will grab tasks via /api/viewer/tasks/grab
 
-                String token = jwtUtil.generateToken(user.getId(), role.name());
+        // Always use the actual role from the saved user (database) for the JWT
+        User savedUser = userRepo.findByEmail(email).orElse(user);
+        String token = jwtUtil.generateToken(savedUser.getId(), savedUser.getRole().name());
 
-                return ResponseEntity.ok(
-                                Map.of("token", token, "role", role.name())
-                );
+        return ResponseEntity.ok(
+                Map.of("token", token, "role", savedUser.getRole().name())
+        );
     }
 
     // ✅ LOGIN
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody Map<String, String> req) {
-
         String email = req.get("email");
         String password = req.get("password");
-        Role role = Role.valueOf(req.get("role").toUpperCase());
-
-        User user = userRepo.findByEmailAndRole(email, role)
-                .orElse(null);
-
-        if (user == null ||
-                !passwordEncoder.matches(password, user.getPassword())) {
-
+        String roleStr = req.get("role");
+        if (roleStr == null) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", "Role is required"));
+        }
+        Role role;
+        try {
+            role = Role.valueOf(roleStr.toUpperCase());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", "Invalid role"));
+        }
+        
+        // For viewers, check both VIEWER and USER roles (backward compatibility)
+        User user = userRepo.findByEmailAndRole(email, role).orElse(null);
+        if (user == null && (role == Role.VIEWER || role == Role.USER)) {
+            // Try the alternative role for viewers
+            Role altRole = (role == Role.VIEWER) ? Role.USER : Role.VIEWER;
+            user = userRepo.findByEmailAndRole(email, altRole).orElse(null);
+        }
+        
+        if (user == null || !passwordEncoder.matches(password, user.getPassword())) {
             return ResponseEntity
                     .status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("message", "Invalid credentials"));
+                    .body(Map.of("message", "Invalid credentials or role"));
         }
 
-        String token = jwtUtil.generateToken(user.getId(), role.name());
+        // Check account status before allowing login
+        if (user.getStatus() != null) {
+            if (user.getStatus() == com.growearn.entity.AccountStatus.BANNED) {
+                return ResponseEntity
+                        .status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("message", "Your account has been permanently banned."));
+            }
+            if (user.getStatus() == com.growearn.entity.AccountStatus.SUSPENDED) {
+                if (user.getSuspensionUntil() == null || java.time.LocalDateTime.now().isBefore(user.getSuspensionUntil())) {
+                    String msg = user.getSuspensionUntil() != null 
+                        ? "Your account is suspended until " + user.getSuspensionUntil()
+                        : "Your account is suspended. Please contact support.";
+                    return ResponseEntity
+                            .status(HttpStatus.FORBIDDEN)
+                            .body(Map.of("message", msg));
+                } else {
+                    // Suspension expired, auto-reactivate
+                    user.setStatus(com.growearn.entity.AccountStatus.ACTIVE);
+                    user.setSuspensionUntil(null);
+                    userRepo.save(user);
+                }
+            }
+        }
 
+        // Always use the actual role from the user entity for the JWT
+        String token = jwtUtil.generateToken(user.getId(), user.getRole().name());
         return ResponseEntity.ok(
-                Map.of("token", token, "role", role.name())
+                Map.of("token", token, "role", user.getRole().name())
         );
     }
 }

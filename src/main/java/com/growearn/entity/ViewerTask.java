@@ -1,9 +1,15 @@
 package com.growearn.entity;
 
 import jakarta.persistence.*;
+import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "viewer_tasks")
+@Table(name = "viewer_tasks",
+       indexes = {
+           @Index(name = "idx_assigned_status", columnList = "assigned_to,status"),
+           @Index(name = "idx_campaign_status", columnList = "campaign_id,status")
+       }
+)
 public class ViewerTask {
 
     @Id
@@ -19,6 +25,17 @@ public class ViewerTask {
     @Column(name = "creator_id")
     private Long creatorId;
 
+    // New field to track which viewer has taken the task
+    @Column(name = "assigned_to")
+    private Long assignedTo;
+    public Long getAssignedTo() {
+        return assignedTo;
+    }
+
+    public void setAssignedTo(Long assignedTo) {
+        this.assignedTo = assignedTo;
+    }
+
     @Column(name = "task_type")
     private String taskType;
 
@@ -30,6 +47,12 @@ public class ViewerTask {
 
     @Column(name = "target_link")
     private String targetLink;
+
+    @Column(name = "proof_url")
+    private String proofUrl;
+
+    @Column(name = "submitted_at")
+    private LocalDateTime submittedAt;
 
     // ---------- Getters & Setters ----------
 
@@ -91,5 +114,21 @@ public class ViewerTask {
 
     public void setTargetLink(String targetLink) {
         this.targetLink = targetLink;
+    }
+
+    public String getProofUrl() {
+        return proofUrl;
+    }
+
+    public void setProofUrl(String proofUrl) {
+        this.proofUrl = proofUrl;
+    }
+
+    public LocalDateTime getSubmittedAt() {
+        return submittedAt;
+    }
+
+    public void setSubmittedAt(LocalDateTime submittedAt) {
+        this.submittedAt = submittedAt;
     }
 }

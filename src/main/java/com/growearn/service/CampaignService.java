@@ -1,7 +1,9 @@
+// ...existing code...
 package com.growearn.service;
 
 import com.growearn.entity.*;
 import com.growearn.repository.*;
+import org.springframework.beans.factory.annotation.Autowired;
 import jakarta.transaction.Transactional;
 import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
@@ -13,65 +15,59 @@ public class CampaignService {
 
     private final CampaignRepository campaignRepository;
     private final UserRepository userRepository;
-    private final ViewerTaskRepository viewerTaskRepository;
+    private final CreatorStatsRepository creatorStatsRepository;
+    private final TaskService taskService;
 
     public CampaignService(
             CampaignRepository campaignRepository,
             UserRepository userRepository,
-            ViewerTaskRepository viewerTaskRepository
+            CreatorStatsRepository creatorStatsRepository,
+            TaskService taskService
     ) {
         this.campaignRepository = campaignRepository;
         this.userRepository = userRepository;
-        this.viewerTaskRepository = viewerTaskRepository;
+        this.creatorStatsRepository = creatorStatsRepository;
+        this.taskService = taskService;
     }
+
 
     @Transactional
     public Campaign createCampaign(Campaign campaign) {
+        // Ensure creator dashboard/stats entry exists
+        creatorStatsRepository.findByCreatorId(campaign.getCreatorId())
+            .orElseGet(() -> creatorStatsRepository.save(new CreatorStats(campaign.getCreatorId())));
+        // Initialize important runtime fields
+        if (campaign.getGoalAmount() == 0.0) campaign.setGoalAmount(campaign.getTotalAmount());
+        campaign.setCurrentAmount(0.0);
+        campaign.setCurrentSubscribers(0);
+        campaign.setCurrentViews(0);
+        campaign.setCurrentLikes(0);
+        campaign.setCurrentComments(0);
+        if (campaign.getUpdatedAt() == null) campaign.setUpdatedAt(java.time.LocalDateTime.now());
+        if (campaign.getTitle() == null) campaign.setTitle("");
+        if (campaign.getDescription() == null) campaign.setDescription("");
+        // Ensure campaign is ACTIVE by default when created
+        if (campaign.getStatus() == null || campaign.getStatus().isEmpty()) campaign.setStatus("ACTIVE");
+        // Always update updatedAt
+        campaign.setUpdatedAt(java.time.LocalDateTime.now());
+
+        // Save campaign (do NOT pre-assign tasks to viewers)
         Campaign savedCampaign = campaignRepository.save(campaign);
-
-        List<User> viewers = userRepository.findByRole(Role.USER);
-
-        for (User viewer : viewers) {
-            if (savedCampaign.getSubscriberGoal() > 0) {
-                createTask(savedCampaign, viewer, "SUBSCRIBE");
-            }
-            if (savedCampaign.getViewsGoal() > 0) {
-                createTask(savedCampaign, viewer, "VIEW");
-            }
-            if (savedCampaign.getLikesGoal() > 0) {
-                createTask(savedCampaign, viewer, "LIKE");
-            }
-            if (savedCampaign.getCommentsGoal() > 0) {
-                createTask(savedCampaign, viewer, "COMMENT");
-            }
+        // Create tasks for this campaign
+        if (taskService != null) {
+            taskService.createTasksForCampaign(savedCampaign);
         }
 
         return savedCampaign;
     }
 
-    private void createTask(Campaign campaign, User viewer, String type) {
-        ViewerTask task = new ViewerTask();
-        task.setCampaignId(campaign.getId());
-        task.setCreatorId(campaign.getCreatorId());
-        task.setViewerId(viewer.getId());
-        task.setTaskType(type);
-        task.setStatus("PENDING");
-        task.setCompleted(false);
-
-        // Set targetLink based on task type and contentType (VIDEO/SHORT)
-        String targetLink = null;
-        String contentType = campaign.getContentType();
-        if (type.equals("SUBSCRIBE")) {
-            targetLink = campaign.getChannelLink();
-        } else if (type.equals("VIEW") || type.equals("LIKE") || type.equals("COMMENT")) {
-            // For both VIDEO and SHORT, use videoLink
-            targetLink = campaign.getVideoLink();
-        }
-        task.setTargetLink(targetLink);
-
-        viewerTaskRepository.save(task);
-    }
+    // legacy per-viewer task creation removed; tasks are created globally via TaskService.createTasksForCampaign
     public List<Campaign> getCampaignsByCreatorAndStatus(Long creatorId, String status) {
         return campaignRepository.findByCreatorIdAndStatus(creatorId, status);
+    }
+
+    // Expose repository method so controllers can fetch campaigns by creator id
+    public List<Campaign> findByCreatorId(Long creatorId) {
+        return campaignRepository.findByCreatorId(creatorId);
     }
 }

@@ -1,16 +1,20 @@
 package com.growearn.controller;
 
 import com.growearn.entity.User;
-import com.growearn.entity.ViewerTask;
+import com.growearn.entity.Earning;
 import com.growearn.repository.UserRepository;
-import com.growearn.repository.ViewerTaskRepository;
+import com.growearn.repository.ViewerTaskEntityRepository;
+import com.growearn.repository.TaskRepository;
 import com.growearn.repository.EarningRepository;
 import com.growearn.security.JwtUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.Optional;
 
 @RestController
@@ -20,92 +24,105 @@ public class ViewerDashboardController {
 
     private final JwtUtil jwtUtil;
     private final UserRepository userRepository;
-    private final ViewerTaskRepository viewerTaskRepository;
+    private final ViewerTaskEntityRepository viewerTaskEntityRepository;
+    private final TaskRepository taskRepository;
     private final EarningRepository earningRepository;
+    private final com.growearn.service.ViewerTaskFlowService viewerTaskFlowService;
 
-    public ViewerDashboardController(JwtUtil jwtUtil, UserRepository userRepository, ViewerTaskRepository viewerTaskRepository, EarningRepository earningRepository) {
+    public ViewerDashboardController(JwtUtil jwtUtil,
+                                      UserRepository userRepository,
+                                      ViewerTaskEntityRepository viewerTaskEntityRepository,
+                                      TaskRepository taskRepository,
+                                      EarningRepository earningRepository,
+                                      com.growearn.service.ViewerTaskFlowService viewerTaskFlowService) {
         this.jwtUtil = jwtUtil;
         this.userRepository = userRepository;
-        this.viewerTaskRepository = viewerTaskRepository;
+        this.viewerTaskEntityRepository = viewerTaskEntityRepository;
+        this.taskRepository = taskRepository;
         this.earningRepository = earningRepository;
+        this.viewerTaskFlowService = viewerTaskFlowService;
     }
 
     @GetMapping("/dashboard")
     public Map<String, Object> getViewerDashboard(HttpServletRequest request) {
-        String authHeader = request.getHeader("Authorization");
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || auth.getPrincipal() == null) {
             return Map.of("error", "Unauthorized");
         }
-        String token = authHeader.substring(7);
-        Long userId = jwtUtil.extractUserId(token);
+        Long userId;
+        try {
+            userId = Long.parseLong(auth.getPrincipal().toString());
+        } catch (Exception e) {
+            return Map.of("error", "Invalid principal");
+        }
 
         Optional<User> userOpt = userRepository.findById(userId);
         if (userOpt.isEmpty()) {
             return Map.of("error", "User not found");
         }
 
-        List<ViewerTask> completedTasks = viewerTaskRepository.findByViewerIdAndCompleted(userId, true);
+        long completedTasksCount = viewerTaskEntityRepository.countByViewerIdAndStatus(userId, "COMPLETED");
 
-        int totalSubscriptions = (int) completedTasks.stream().filter(t -> "SUBSCRIBE".equalsIgnoreCase(t.getTaskType())).count();
-        int videoViews = (int) completedTasks.stream().filter(t -> "VIEW".equalsIgnoreCase(t.getTaskType())).count();
-        int videoLikes = (int) completedTasks.stream().filter(t -> "LIKE".equalsIgnoreCase(t.getTaskType())).count();
-        int videoComments = (int) completedTasks.stream().filter(t -> "COMMENT".equalsIgnoreCase(t.getTaskType())).count();
-        int shortViews = (int) completedTasks.stream().filter(t -> "SHORT_VIEW".equalsIgnoreCase(t.getTaskType())).count();
-        int shortLikes = (int) completedTasks.stream().filter(t -> "SHORT_LIKE".equalsIgnoreCase(t.getTaskType())).count();
-        int shortComments = (int) completedTasks.stream().filter(t -> "SHORT_COMMENT".equalsIgnoreCase(t.getTaskType())).count();
+        Double totalEarnings = earningRepository.sumEarningsByViewerId(userId);
+        if (totalEarnings == null) totalEarnings = 0.0;
 
-        Double moneyEarnings = earningRepository.sumEarningsByViewerId(userId);
-        if (moneyEarnings == null) moneyEarnings = 0.0;
+        long availableTasksCount = taskRepository.countByStatus("OPEN");
 
         return Map.of(
-            "userId", userId,
-            "totalSubscriptions", totalSubscriptions,
-            "videoViews", videoViews,
-            "videoLikes", videoLikes,
-            "videoComments", videoComments,
-            "moneyEarnings", moneyEarnings,
-            "shortViews", shortViews,
-            "shortLikes", shortLikes,
-            "shortComments", shortComments
+            "completedTasksCount", completedTasksCount,
+            "totalEarnings", totalEarnings,
+            "availableTasksCount", availableTasksCount
         );
     }
     @GetMapping("/earnings")
     public Map<String, Object> getViewerEarnings(HttpServletRequest request) {
-        String authHeader = request.getHeader("Authorization");
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || auth.getPrincipal() == null) {
             return Map.of("error", "Unauthorized");
         }
-        String token = authHeader.substring(7);
-        Long userId = jwtUtil.extractUserId(token);
+        Long userId = Long.parseLong(auth.getPrincipal().toString());
 
-        Double moneyEarnings = earningRepository.sumEarningsByViewerId(userId);
-        if (moneyEarnings == null) moneyEarnings = 0.0;
+        List<Earning> earningsList = earningRepository.findByViewerId(userId);
+        Double totalEarnings = earningRepository.sumEarningsByViewerId(userId);
+        if (totalEarnings == null) totalEarnings = 0.0;
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("userId", userId);
+        result.put("totalEarnings", totalEarnings);
+        result.put("earnings", earningsList);
+        return result;
+    }
+
+    @GetMapping("/wallet")
+    public Map<String, Object> getViewerWallet(HttpServletRequest request) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || auth.getPrincipal() == null) {
+            return Map.of("error", "Unauthorized");
+        }
+        Long userId = Long.parseLong(auth.getPrincipal().toString());
+
+        Double totalEarnings = earningRepository.sumEarningsByViewerId(userId);
+        if (totalEarnings == null) totalEarnings = 0.0;
 
         return Map.of(
             "userId", userId,
-            "moneyEarnings", moneyEarnings
+            "balance", totalEarnings
         );
     }
 
     @PostMapping("/tasks/{taskId}/claim")
     public Map<String, Object> claimTask(@PathVariable Long taskId, HttpServletRequest request) {
-
-        String token = request.getHeader("Authorization").substring(7);
-        Long userId = jwtUtil.extractUserId(token);
-
-        Optional<ViewerTask> taskOpt = viewerTaskRepository.findById(taskId);
-        if (taskOpt.isEmpty()) {
-            return Map.of("error", "Task not found");
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || auth.getPrincipal() == null) {
+            return Map.of("error", "Unauthorized");
         }
+        Long userId = Long.parseLong(auth.getPrincipal().toString());
 
-        ViewerTask task = taskOpt.get();
-        if (task.getViewerId() != null) {
-            return Map.of("error", "Task already claimed");
+        try {
+            viewerTaskFlowService.grabTask(taskId, userId);
+            return Map.of("success", true, "message", "Task grabbed successfully");
+        } catch (Exception ex) {
+            return Map.of("error", ex.getMessage());
         }
-
-        task.setViewerId(userId);
-        viewerTaskRepository.save(task);
-
-        return Map.of("success", true, "message", "Task claimed successfully");
     }
 }

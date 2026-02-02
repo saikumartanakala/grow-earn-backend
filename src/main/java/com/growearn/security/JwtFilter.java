@@ -16,7 +16,6 @@ import java.util.List;
 
 import org.springframework.stereotype.Component;
 
-@Component
 public class JwtFilter extends OncePerRequestFilter {
 
     private final JwtUtil jwtUtil;
@@ -33,55 +32,44 @@ public class JwtFilter extends OncePerRequestFilter {
     ) throws ServletException, IOException {
 
         String path = request.getRequestURI();
-            System.out.println("[JwtFilter] Request URI: " + path);
 
-        // skip auth
+        // Allow unauthenticated access to auth endpoints
         if (path.startsWith("/api/auth/")) {
-                System.out.println("[JwtFilter] Skipping auth for: " + path);
             filterChain.doFilter(request, response);
             return;
         }
 
         String authHeader = request.getHeader("Authorization");
-            System.out.println("[JwtFilter] Authorization header: " + authHeader);
-
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            System.out.println("[JwtFilter] Missing or invalid Authorization header");
-            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            response.setContentType("application/json");
-            response.getWriter().write("{\"error\":\"Missing or invalid Authorization header\"}");
+            // No token present — do not set authentication; let Spring handle access control
+            filterChain.doFilter(request, response);
             return;
         }
 
         String token = authHeader.substring(7);
-            System.out.println("[JwtFilter] JWT token: " + token);
+        try {
+            if (!jwtUtil.validateToken(token)) {
+                filterChain.doFilter(request, response);
+                return;
+            }
 
-        if (!jwtUtil.validateToken(token)) {
-            System.out.println("[JwtFilter] Invalid JWT token");
-            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            response.setContentType("application/json");
-            response.getWriter().write("{\"error\":\"Invalid JWT token\"}");
-            return;
-        }
+            Long userId = jwtUtil.extractUserId(token);
+            String role = jwtUtil.extractRole(token);
+            if (role == null) {
+                filterChain.doFilter(request, response);
+                return;
+            }
 
-        Long userId = jwtUtil.extractUserId(token);
-        String role = jwtUtil.extractRole(token);
-            System.out.println("[JwtFilter] Extracted userId: " + userId + ", role: " + role);
-        if (role == null) {
-            System.out.println("[JwtFilter] Role is null in JWT");
-            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-            response.setContentType("application/json");
-            response.getWriter().write("{\"error\":\"Role is missing in JWT\"}");
-            return;
+            List<SimpleGrantedAuthority> authorities = List.of(new SimpleGrantedAuthority("ROLE_" + role.toUpperCase()));
+
+            // Use username as userId string in principal
+            String principal = String.valueOf(userId);
+            UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(principal, null, authorities);
+            SecurityContextHolder.getContext().setAuthentication(authentication);
+        } catch (Exception ex) {
+            // On any exception, do not set authentication and continue — Spring Security will deny access if required
+            System.out.println("[JwtFilter] Exception processing token: " + ex.getMessage());
         }
-        UsernamePasswordAuthenticationToken authentication =
-            new UsernamePasswordAuthenticationToken(
-                userId,
-                null,
-                List.of(new SimpleGrantedAuthority("ROLE_" + role.toUpperCase()))
-            );
-        SecurityContextHolder.getContext().setAuthentication(authentication);
-            System.out.println("[JwtFilter] Authentication set for userId: " + userId + ", authorities: ROLE_" + role.toUpperCase());
 
         filterChain.doFilter(request, response);
     }
