@@ -27,7 +27,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 
 @RestController
 @RequestMapping({"/api/creator/campaign", "/api/creator/campaigns"})
-@CrossOrigin(origins = "http://localhost:5173", allowCredentials = "true")
+@CrossOrigin(origins = {"http://localhost:5173", "http://192.168.55.104:5173"}, allowCredentials = "true")
 public class CampaignController {
 
     private final CampaignService campaignService;
@@ -180,7 +180,37 @@ public class CampaignController {
         try {
             Campaign saved = campaignService.createCampaign(campaign);
             System.out.println("[CampaignController] Campaign created for creatorId: " + creatorId + ", campaignId: " + (saved != null ? saved.getId() : "null"));
-            return ResponseEntity.ok(saved);
+            // Return a DTO/map instead of the JPA entity
+            Map<String, Object> dto = new java.util.HashMap<>();
+            dto.put("id", saved.getId());
+            dto.put("creatorId", saved.getCreatorId());
+            dto.put("title", saved.getTitle());
+            dto.put("description", saved.getDescription());
+            dto.put("goalAmount", saved.getGoalAmount());
+            dto.put("currentAmount", saved.getCurrentAmount());
+            dto.put("updatedAt", saved.getUpdatedAt() != null ? saved.getUpdatedAt().toString() : null);
+            dto.put("platform", saved.getPlatform());
+            dto.put("goalType", saved.getGoalType());
+            dto.put("channelName", saved.getChannelName());
+            dto.put("channelLink", saved.getChannelLink());
+            dto.put("contentType", saved.getContentType());
+            dto.put("videoLink", saved.getVideoLink());
+            dto.put("videoDuration", saved.getVideoDuration());
+            dto.put("subscriberGoal", saved.getSubscriberGoal());
+            dto.put("viewsGoal", saved.getViewsGoal());
+            dto.put("likesGoal", saved.getLikesGoal());
+            dto.put("commentsGoal", saved.getCommentsGoal());
+            dto.put("currentSubscribers", saved.getCurrentSubscribers());
+            dto.put("currentViews", saved.getCurrentViews());
+            dto.put("currentLikes", saved.getCurrentLikes());
+            dto.put("currentComments", saved.getCurrentComments());
+            dto.put("subscriberTaskCount", saved.getSubscriberTaskCount());
+            dto.put("viewsTaskCount", saved.getViewsTaskCount());
+            dto.put("likesTaskCount", saved.getLikesTaskCount());
+            dto.put("commentsTaskCount", saved.getCommentsTaskCount());
+            dto.put("totalAmount", saved.getTotalAmount());
+            dto.put("status", saved.getStatus());
+            return ResponseEntity.ok(dto);
         } catch (Exception e) {
             System.out.println("[CampaignController] Failed to create campaign: " + e.getMessage());
             return ResponseEntity.status(400).body("Failed to create campaign: " + e.getMessage());

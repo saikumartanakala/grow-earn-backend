@@ -16,6 +16,10 @@ import java.util.Optional;
 @Service
 public class UserService {
 
+    public User save(User user) {
+        return userRepository.save(user);
+    }
+
     private static final Logger logger = LoggerFactory.getLogger(UserService.class);
 
     private final UserRepository userRepository;

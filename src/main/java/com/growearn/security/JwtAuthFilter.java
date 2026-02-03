@@ -5,6 +5,8 @@ import com.growearn.entity.User;
 import com.growearn.entity.RevokedToken;
 import com.growearn.repository.UserRepository;
 import com.growearn.repository.RevokedTokenRepository;
+import com.growearn.repository.DeviceRegistryRepository;
+import com.growearn.entity.DeviceRegistry;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -25,6 +27,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private final UserRepository userRepository;
     private final JwtUtil jwtUtil;
     private final RevokedTokenRepository revokedTokenRepository;
+    private final DeviceRegistryRepository deviceRegistryRepository;
 
     /**
      * Extract JWT token from Authorization header
@@ -37,66 +40,60 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         return null;
     }
 
-    public JwtAuthFilter(UserRepository userRepository, JwtUtil jwtUtil, RevokedTokenRepository revokedTokenRepository) {
+    public JwtAuthFilter(UserRepository userRepository, JwtUtil jwtUtil, RevokedTokenRepository revokedTokenRepository, DeviceRegistryRepository deviceRegistryRepository) {
         this.userRepository = userRepository;
         this.jwtUtil = jwtUtil;
         this.revokedTokenRepository = revokedTokenRepository;
+        this.deviceRegistryRepository = deviceRegistryRepository;
     }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
         try {
             String token = getTokenFromRequest(request);
-            System.out.println("[JwtAuthFilter] Incoming request URI: " + request.getRequestURI());
-            System.out.println("[JwtAuthFilter] Raw token: " + (token != null ? token : "<none>"));
             if (token == null) {
                 filterChain.doFilter(request, response);
                 return;
             }
-
             if (isTokenRevoked(token)) {
-                System.out.println("[JwtAuthFilter] Token revoked");
+                logSecurity("REJECT", "Token revoked", null, request);
                 sendUnauthorizedResponse(response, "Token has been revoked");
                 return;
             }
-
             Long userId = jwtUtil.extractUserId(token);
             String role = jwtUtil.extractRole(token);
-            System.out.println("[JwtAuthFilter] Extracted userId: " + userId);
-            System.out.println("[JwtAuthFilter] Extracted role: " + role);
-
-            // Check user status (suspended/banned)
             Optional<User> userOpt = userRepository.findById(userId);
             if (userOpt.isEmpty()) {
-                System.out.println("[JwtAuthFilter] User not found: " + userId);
+                logSecurity("REJECT", "User not found", userId, request);
                 sendUnauthorizedResponse(response, "User not found");
                 return;
             }
-
             User user = userOpt.get();
-            System.out.println("[JwtAuthFilter] DB user role: " + (user.getRole() != null ? user.getRole().name() : "<none>"));
-            System.out.println("[JwtAuthFilter] DB user status: " + (user.getStatus() != null ? user.getStatus().name() : "<none>"));
-
-            // Handle NULL status as ACTIVE (for existing users before migration)
-            AccountStatus status = user.getStatus();
-            if (status == null) {
-                status = AccountStatus.ACTIVE;
+            // Device fingerprint enforcement
+            String deviceFingerprint = request.getHeader("X-Device-Fingerprint");
+            if (deviceFingerprint == null || deviceFingerprint.isBlank()) {
+                logSecurity("REJECT", "Missing device fingerprint", userId, request);
+                sendUnauthorizedResponse(response, "Device fingerprint required");
+                return;
             }
-
-            // Check if user is banned
+            if (user.getDeviceFingerprint() == null || !user.getDeviceFingerprint().equals(deviceFingerprint)) {
+                // Revoke token, log, and block
+                revokeToken(token, user, "Device fingerprint mismatch");
+                logSecurity("REVOKE", "Device fingerprint mismatch", userId, request);
+                sendUnauthorizedResponse(response, "Device mismatch");
+                return;
+            }
+            // Account status enforcement
+            AccountStatus status = user.getStatus() != null ? user.getStatus() : AccountStatus.ACTIVE;
             if (status == AccountStatus.BANNED) {
-                System.out.println("[JwtAuthFilter] User is banned: " + userId);
+                logSecurity("REJECT", "User banned", userId, request);
                 sendForbiddenResponse(response, "Your account has been permanently banned.");
                 return;
             }
-
-            // Check if user is suspended
             if (status == AccountStatus.SUSPENDED) {
                 if (user.getSuspensionUntil() == null || LocalDateTime.now().isBefore(user.getSuspensionUntil())) {
-                    String message = user.getSuspensionUntil() != null 
-                        ? "Your account is suspended until " + user.getSuspensionUntil()
-                        : "Your account is suspended. Please contact support.";
-                    System.out.println("[JwtAuthFilter] User is suspended: " + userId);
+                    String message = user.getSuspensionUntil() != null ? "Your account is suspended until " + user.getSuspensionUntil() : "Your account is suspended. Please contact support.";
+                    logSecurity("REJECT", "User suspended", userId, request);
                     sendForbiddenResponse(response, message);
                     return;
                 } else {
@@ -104,13 +101,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                     user.setStatus(AccountStatus.ACTIVE);
                     user.setSuspensionUntil(null);
                     userRepository.save(user);
-                    System.out.println("[JwtAuthFilter] User suspension expired, reactivated: " + userId);
+                    logSecurity("INFO", "User suspension expired, reactivated", userId, request);
                 }
             }
-
-            // Normalize role values: accept synonyms and ensure Spring Security `ROLE_` prefix
+            // Normal role/authority setup
             String raw = role != null ? role.toUpperCase().trim() : "<none>";
-            // Map common synonyms to canonical roles
             String mapped;
             switch (raw) {
                 case "USER", "VIEWER", "VIEWER_ROLE" -> mapped = "VIEWER";
@@ -120,8 +115,6 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             }
             String normalized = mapped.startsWith("ROLE_") ? mapped : "ROLE_" + mapped;
             List<SimpleGrantedAuthority> authorities = List.of(new SimpleGrantedAuthority(normalized));
-
-            // Use userId string as principal and attach request details
             String principal = String.valueOf(userId);
             UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(principal, null, authorities);
             try {
@@ -129,13 +122,28 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 authentication.setDetails(src.buildDetails(request));
             } catch (Exception ignored) {}
             SecurityContextHolder.getContext().setAuthentication(authentication);
-
-            // Log accepted token principal & role for debugging (no token value)
-            System.out.println("[JwtAuthFilter] Accepted token for userId=" + principal + " role=" + mapped);
+            logSecurity("ACCEPT", "Token accepted", userId, request);
         } catch (Exception ex) {
-            System.out.println("[JwtAuthFilter] Exception processing token: " + ex.getMessage());
+            logSecurity("ERROR", "Exception processing token: " + ex.getMessage(), null, request);
         }
         filterChain.doFilter(request, response);
+    }
+    private void revokeToken(String jwt, User user, String reason) {
+        RevokedToken revoked = new RevokedToken();
+        revoked.setTokenHash(RevokedToken.hashToken(jwt));
+        revoked.setUserId(user.getId());
+        revoked.setToken(jwt);
+        revoked.setReason(reason);
+        revoked.setRevokedAt(LocalDateTime.now());
+        revokedTokenRepository.save(revoked);
+    }
+
+    private void logSecurity(String action, String message, Long userId, HttpServletRequest request) {
+        String ip = request.getHeader("X-Forwarded-For");
+        if (ip == null) ip = request.getRemoteAddr();
+        String device = request.getHeader("X-Device-Fingerprint");
+        String userAgent = request.getHeader("User-Agent");
+        System.out.println(String.format("{\"event\":\"jwt_security\",\"action\":\"%s\",\"userId\":%s,\"ip\":\"%s\",\"device\":\"%s\",\"userAgent\":\"%s\",\"message\":\"%s\"}", action, userId, ip, device, userAgent, message));
     }
 
     // ...existing code for isTokenRevoked, sendUnauthorizedResponse, sendForbiddenResponse...

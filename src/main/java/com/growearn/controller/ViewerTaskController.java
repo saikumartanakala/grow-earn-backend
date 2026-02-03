@@ -18,7 +18,7 @@ import java.util.HashMap;
 
 @RestController
 @RequestMapping("/api/viewer/tasks")
-@CrossOrigin(origins = "http://localhost:5173", allowCredentials = "true")
+@CrossOrigin(origins = {"http://localhost:5173", "http://192.168.55.104:5173"}, allowCredentials = "true")
 public class ViewerTaskController {
 
     private final ViewerTaskFlowService viewerTaskFlowService;

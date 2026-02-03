@@ -1,6 +1,12 @@
+
 package com.growearn.controller;
+import com.growearn.repository.DeviceRegistryRepository;
+import com.growearn.repository.LoginAuditRepository;
+import com.growearn.entity.DeviceRegistry;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 import com.growearn.entity.*;
+import com.growearn.dto.UserDTO;
 import com.growearn.service.UserService;
 import com.growearn.service.UserViolationService;
 import com.growearn.security.JwtUtil;
@@ -17,7 +23,8 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/admin/users")
-@CrossOrigin(origins = "http://localhost:5173", allowCredentials = "true")
+@CrossOrigin(origins = {"http://localhost:5173", "http://192.168.55.104:5173"}, allowCredentials = "true")
+@PreAuthorize("hasRole('ADMIN')")
 public class AdminUserController {
 
     private static final Logger logger = LoggerFactory.getLogger(AdminUserController.class);
@@ -25,11 +32,101 @@ public class AdminUserController {
     private final UserService userService;
     private final UserViolationService violationService;
     private final JwtUtil jwtUtil;
+    private final DeviceRegistryRepository deviceRegistryRepo;
+    private final LoginAuditRepository loginAuditRepo;
 
-    public AdminUserController(UserService userService, UserViolationService violationService, JwtUtil jwtUtil) {
+    public AdminUserController(UserService userService, UserViolationService violationService, JwtUtil jwtUtil, DeviceRegistryRepository deviceRegistryRepo, LoginAuditRepository loginAuditRepo) {
         this.userService = userService;
         this.violationService = violationService;
         this.jwtUtil = jwtUtil;
+        this.deviceRegistryRepo = deviceRegistryRepo;
+        this.loginAuditRepo = loginAuditRepo;
+    }
+    /**
+     * GET /api/admin/devices
+     * List all device registry entries
+     */
+    @GetMapping("/devices")
+    public ResponseEntity<?> getAllDevices() {
+        List<DeviceRegistry> devices = deviceRegistryRepo.findAll();
+        List<Map<String, Object>> deviceList = devices.stream().map(device -> {
+            Map<String, Object> map = new java.util.HashMap<>();
+            map.put("id", device.getId());
+            map.put("deviceFingerprint", device.getDeviceFingerprint());
+            map.put("userId", device.getUser() != null ? device.getUser().getId() : null);
+            map.put("role", device.getRole());
+            map.put("firstIp", device.getFirstIp());
+            map.put("lastIp", device.getLastIp());
+            map.put("createdAt", device.getCreatedAt() != null ? device.getCreatedAt().toString() : null);
+            map.put("lastSeenAt", device.getLastSeenAt() != null ? device.getLastSeenAt().toString() : null);
+            return map;
+        }).collect(Collectors.toList());
+        return ResponseEntity.ok(deviceList);
+    }
+
+    /**
+     * GET /api/admin/users/{id}/security
+     * Get user security info (device, status, last IP)
+     */
+    @GetMapping("/{id}/security")
+    public ResponseEntity<?> getUserSecurity(@PathVariable Long id) {
+        return userService.findById(id)
+            .map(user -> Map.of(
+                "id", user.getId(),
+                "email", user.getEmail(),
+                "role", user.getRole().name(),
+                "status", user.getStatus() != null ? user.getStatus().name() : "ACTIVE",
+                "deviceFingerprint", user.getDeviceFingerprint(),
+                "lastIp", user.getLastIp(),
+                "suspensionUntil", user.getSuspensionUntil(),
+                "createdAt", user.getCreatedAt(),
+                "updatedAt", user.getUpdatedAt()
+            ))
+            .map(ResponseEntity::ok)
+            .orElse(ResponseEntity.notFound().build());
+    }
+
+    /**
+     * POST /api/admin/users/{id}/reset-device
+     * Remove device registry entry, clear user.device_fingerprint, revoke all tokens, log admin action
+     */
+    @PostMapping("/{id}/reset-device")
+    @org.springframework.transaction.annotation.Transactional
+    public ResponseEntity<?> resetDevice(@PathVariable Long id, HttpServletRequest req) {
+        Long adminId = extractAdminId(req);
+        User user = userService.findById(id).orElse(null);
+        if (user == null) return ResponseEntity.notFound().build();
+        String fingerprint = user.getDeviceFingerprint();
+        if (fingerprint != null) {
+            deviceRegistryRepo.deleteByDeviceFingerprint(fingerprint);
+        }
+        user.setDeviceFingerprint(null);
+        userService.forceLogout(id, adminId, "Device reset by admin");
+        userService.save(user);
+        logger.info("Admin {} reset device for user {}", adminId, id);
+        return ResponseEntity.ok(Map.of("success", true, "message", "Device reset, user must re-register device."));
+    }
+
+    /**
+     * POST /api/admin/users/{id}/suspend
+     * Suspend user (indefinite)
+     */
+
+    /**
+     * POST /api/admin/users/{id}/ban
+     * Ban user
+     */
+
+    /**
+     * POST /api/admin/users/{id}/force-logout
+     * Force logout user
+     */
+    @PostMapping("/{id}/force-logout")
+    public ResponseEntity<?> forceLogoutByIdAdmin(@PathVariable Long id, HttpServletRequest req) {
+        Long adminId = extractAdminId(req);
+        userService.forceLogout(id, adminId, "Force logout by admin");
+        logger.info("Admin {} forced logout for user {} via /{id}/force-logout", adminId, id);
+        return ResponseEntity.ok(Map.of("success", true, "message", "User logged out, all tokens revoked."));
     }
 
     private Long extractAdminId(HttpServletRequest req) {
@@ -47,8 +144,8 @@ public class AdminUserController {
     @GetMapping
     public ResponseEntity<?> getAllUsers() {
         List<User> users = userService.findAllUsers();
-        List<Map<String, Object>> userList = users.stream()
-            .map(this::userToMap)
+        List<UserDTO> userList = users.stream()
+            .map(this::userToDTO)
             .collect(Collectors.toList());
         return ResponseEntity.ok(userList);
     }
@@ -60,7 +157,7 @@ public class AdminUserController {
     @GetMapping("/{id}")
     public ResponseEntity<?> getUser(@PathVariable Long id) {
         return userService.findById(id)
-            .map(user -> ResponseEntity.ok(userToMap(user)))
+            .map(user -> ResponseEntity.ok(userToDTO(user)))
             .orElse(ResponseEntity.notFound().build());
     }
 
@@ -73,8 +170,8 @@ public class AdminUserController {
         try {
             Role r = Role.valueOf(role.toUpperCase());
             List<User> users = userService.findByRole(r);
-            List<Map<String, Object>> userList = users.stream()
-                .map(this::userToMap)
+            List<UserDTO> userList = users.stream()
+                .map(this::userToDTO)
                 .collect(Collectors.toList());
             return ResponseEntity.ok(userList);
         } catch (IllegalArgumentException e) {
@@ -103,7 +200,7 @@ public class AdminUserController {
             return ResponseEntity.ok(Map.of(
                 "success", true,
                 "message", "User activated successfully",
-                "user", userToMap(user)
+                "user", userToDTO(user)
             ));
         } catch (Exception e) {
             return ResponseEntity.badRequest()
@@ -132,7 +229,7 @@ public class AdminUserController {
             return ResponseEntity.ok(Map.of(
                 "success", true,
                 "message", "User deactivated successfully",
-                "user", userToMap(user)
+                "user", userToDTO(user)
             ));
         } catch (Exception e) {
             return ResponseEntity.badRequest()
@@ -165,7 +262,7 @@ public class AdminUserController {
                 "success", true,
                 "message", "User suspended for " + days + " days",
                 "suspensionUntil", user.getSuspensionUntil().toString(),
-                "user", userToMap(user)
+                "user", userToDTO(user)
             ));
         } catch (Exception e) {
             return ResponseEntity.badRequest()
@@ -195,7 +292,7 @@ public class AdminUserController {
             return ResponseEntity.ok(Map.of(
                 "success", true,
                 "message", "User permanently banned",
-                "user", userToMap(user)
+                "user", userToDTO(user)
             ));
         } catch (Exception e) {
             return ResponseEntity.badRequest()
@@ -224,7 +321,7 @@ public class AdminUserController {
             return ResponseEntity.ok(Map.of(
                 "success", true,
                 "message", "Creator verified successfully",
-                "user", userToMap(user)
+                "user", userToDTO(user)
             ));
         } catch (Exception e) {
             return ResponseEntity.badRequest()
@@ -252,7 +349,7 @@ public class AdminUserController {
             return ResponseEntity.ok(Map.of(
                 "success", true,
                 "message", "Creator verification removed",
-                "user", userToMap(user)
+                "user", userToDTO(user)
             ));
         } catch (Exception e) {
             return ResponseEntity.badRequest()
@@ -273,7 +370,7 @@ public class AdminUserController {
                 return ResponseEntity.ok(Map.of(
                     "success", true,
                     "message", "Creator verified successfully",
-                    "user", userToMap(user)
+                    "user", userToDTO(user)
                 ));
             } catch (Exception e) {
                 logger.error("Failed to verify creator {}: {}", id, e.getMessage());
@@ -296,7 +393,7 @@ public class AdminUserController {
             return ResponseEntity.ok(Map.of(
                 "success", true,
                 "message", "Creator verification removed",
-                "user", userToMap(user)
+                "user", userToDTO(user)
             ));
         } catch (Exception e) {
             logger.error("Failed to unverify creator {}: {}", id, e.getMessage());
@@ -322,7 +419,7 @@ public class AdminUserController {
                 "success", true,
                 "message", "User suspended for " + suspendDays + " days",
                 "suspensionUntil", user.getSuspensionUntil() != null ? user.getSuspensionUntil().toString() : null,
-                "user", userToMap(user)
+                "user", userToDTO(user)
             ));
         } catch (Exception e) {
             logger.error("Failed to suspend user {}: {}", id, e.getMessage());
@@ -346,7 +443,7 @@ public class AdminUserController {
             return ResponseEntity.ok(Map.of(
                 "success", true,
                 "message", "User permanently banned",
-                "user", userToMap(user)
+                "user", userToDTO(user)
             ));
         } catch (Exception e) {
             logger.error("Failed to ban user {}: {}", id, e.getMessage());
@@ -417,7 +514,7 @@ public class AdminUserController {
             return ResponseEntity.ok(Map.of(
                 "success", true,
                 "message", "User activated successfully",
-                "user", userToMap(user)
+                "user", userToDTO(user)
             ));
         } catch (Exception e) {
             logger.error("Failed to activate user {}: {}", id, e.getMessage());
@@ -585,16 +682,16 @@ public class AdminUserController {
         return null;
     }
 
-    private Map<String, Object> userToMap(User user) {
-        Map<String, Object> map = new java.util.HashMap<>();
-        map.put("id", user.getId());
-        map.put("email", user.getEmail());
-        map.put("role", user.getRole().name());
-        map.put("status", user.getStatus() != null ? user.getStatus().name() : "ACTIVE");
-        map.put("isVerified", user.getIsVerified() != null ? user.getIsVerified() : false);
-        map.put("suspensionUntil", user.getSuspensionUntil() != null ? user.getSuspensionUntil().toString() : null);
-        map.put("createdAt", user.getCreatedAt() != null ? user.getCreatedAt().toString() : null);
-        map.put("canLogin", userService.canUserLogin(user));
-        return map;
+    private UserDTO userToDTO(User user) {
+        return new UserDTO(
+            user.getId(),
+            user.getEmail(),
+            user.getRole() != null ? user.getRole().name() : null,
+            user.getStatus() != null ? user.getStatus().name() : "ACTIVE",
+            user.getIsVerified() != null ? user.getIsVerified() : false,
+            user.getSuspensionUntil() != null ? user.getSuspensionUntil().toString() : null,
+            user.getCreatedAt() != null ? user.getCreatedAt().toString() : null,
+            userService.canUserLogin(user)
+        );
     }
 }

@@ -17,7 +17,7 @@ import org.slf4j.LoggerFactory;
 
 @RestController
 @RequestMapping("/api/creator/dashboard")
-@CrossOrigin(origins = "http://localhost:5173", allowCredentials = "true")
+@CrossOrigin(origins = {"http://localhost:5173", "http://192.168.55.104:5173"}, allowCredentials = "true")
 public class CreatorDashboardController {
     private final JwtUtil jwtUtil;
     private final CreatorStatsService creatorStatsService;

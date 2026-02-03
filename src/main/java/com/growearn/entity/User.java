@@ -16,12 +16,23 @@ public class User {
 
     private String password;
 
+
     @Enumerated(EnumType.STRING)
     private Role role;
 
-    @Column(length = 20)
+    @Column(name = "device_fingerprint", length = 255, unique = true)
+    private String deviceFingerprint;
+
+    @Column(name = "last_ip", length = 100)
+    private String lastIp;
+
+    @Column(name = "account_status", length = 20)
     @Enumerated(EnumType.STRING)
     private AccountStatus status = AccountStatus.ACTIVE;
+    public String getDeviceFingerprint() { return deviceFingerprint; }
+    public void setDeviceFingerprint(String deviceFingerprint) { this.deviceFingerprint = deviceFingerprint; this.updatedAt = LocalDateTime.now(); }
+    public String getLastIp() { return lastIp; }
+    public void setLastIp(String lastIp) { this.lastIp = lastIp; this.updatedAt = LocalDateTime.now(); }
 
     @Column(name = "is_verified")
     private Boolean isVerified = false;

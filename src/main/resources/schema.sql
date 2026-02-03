@@ -1,12 +1,42 @@
 -- ===============================
 -- USERS TABLE (Update existing)
 -- ===============================
--- Run this ALTER to add new columns to existing users table:
+
+-- ALTER TABLE users ADD COLUMN IF NOT EXISTS device_fingerprint VARCHAR(255) UNIQUE;
+-- ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ip VARCHAR(100);
+-- ALTER TABLE users ADD COLUMN IF NOT EXISTS account_status VARCHAR(20) DEFAULT 'ACTIVE';
 -- ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'ACTIVE';
 -- ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;
 -- ALTER TABLE users ADD COLUMN IF NOT EXISTS suspension_until TIMESTAMP NULL;
 -- ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
 -- ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;
+-- ===============================
+-- DEVICE REGISTRY TABLE
+-- ===============================
+CREATE TABLE IF NOT EXISTS `device_registry` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `device_fingerprint` VARCHAR(255) NOT NULL UNIQUE,
+  `user_id` BIGINT NOT NULL,
+  `role` VARCHAR(50) NOT NULL,
+  `first_ip` VARCHAR(100),
+  `last_ip` VARCHAR(100),
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `last_seen_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT `fk_device_registry_user` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ===============================
+-- LOGIN AUDIT TABLE
+-- ===============================
+CREATE TABLE IF NOT EXISTS `login_audit` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `user_id` BIGINT,
+  `ip_address` VARCHAR(100),
+  `device_fingerprint` VARCHAR(255),
+  `user_agent` VARCHAR(512),
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT `fk_login_audit_user` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Profile fields (run these ALTER statements):
 -- ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name VARCHAR(100);
