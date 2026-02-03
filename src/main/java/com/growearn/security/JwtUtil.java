@@ -66,6 +66,12 @@ public class JwtUtil {
         return parseClaims(token).get("role", String.class);
     }
 
+    // ✅ Check if token is expired
+    public boolean isTokenExpired(String token) {
+        Date expiration = parseClaims(token).getExpiration();
+        return expiration.before(new Date());
+    }
+
     // 🔒 Centralized claim parsing
     private Claims parseClaims(String token) {
         return Jwts.parserBuilder()

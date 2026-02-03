@@ -25,6 +25,7 @@ import java.util.Map;
 import com.growearn.dto.AuthResponseDTO;
 import java.util.List;
 import com.growearn.entity.Campaign;
+import java.util.Optional;
 
 import jakarta.validation.ConstraintViolationException;
 
@@ -133,7 +134,9 @@ public class AuthController {
 
         User newUser = new User(email, passwordEncoder.encode(password), dbRole);
         newUser.setDeviceFingerprint(deviceFingerprint);
-        newUser.setLastIp(clientIp);
+        newUser.setJoined(java.time.LocalDateTime.now());
+        newUser.setFirstIp(clientIp);
+        newUser.setLastActive(java.time.LocalDateTime.now());
         logger.info("Saving new user with email: " + email);
         User savedUser = userRepo.save(newUser);
         logger.info("Saved user with ID: " + savedUser.getId());
@@ -145,14 +148,25 @@ public class AuthController {
         // Assign user_id to device registry
         logger.info("Assigning user_id to device registry: " + fetchedUser.getId());
         try {
-            DeviceRegistry deviceRegistry = new DeviceRegistry();
-            deviceRegistry.setUser(fetchedUser);
-            deviceRegistry.setDeviceFingerprint(deviceFingerprint);
-            deviceRegistry.setRole(role.name());
-            deviceRegistry.setFirstIp(clientIp);
-            deviceRegistry.setLastIp(clientIp);
-            deviceRegistryRepo.save(deviceRegistry);
-            logger.info("DeviceRegistry entry created with user ID: " + deviceRegistry.getUser().getId());
+            // Check if device registry entry already exists
+            Optional<DeviceRegistry> existingRegistry = deviceRegistryRepo.findByDeviceFingerprint(deviceFingerprint);
+            if (existingRegistry.isPresent()) {
+                DeviceRegistry registry = existingRegistry.get();
+                registry.setLastIp(clientIp);
+                registry.setLastSeenAt(java.time.LocalDateTime.now());
+                deviceRegistryRepo.save(registry);
+                logger.info("Updated existing DeviceRegistry entry for user ID: " + registry.getUser().getId());
+            } else {
+                DeviceRegistry deviceRegistry = new DeviceRegistry();
+                deviceRegistry.setUser(fetchedUser);
+                deviceRegistry.setDeviceFingerprint(deviceFingerprint);
+                deviceRegistry.setRole(role.name());
+                deviceRegistry.setFirstIp(clientIp);
+                deviceRegistry.setLastIp(clientIp);
+                deviceRegistry.setLastSeenAt(java.time.LocalDateTime.now());
+                deviceRegistryRepo.save(deviceRegistry);
+                logger.info("DeviceRegistry entry created with user ID: " + deviceRegistry.getUser().getId());
+            }
         } catch (ConstraintViolationException e) {
             logger.error("Constraint violation while saving device registry entry", e);
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Device fingerprint already exists"));
@@ -190,21 +204,27 @@ public class AuthController {
         String clientIp = getClientIp(request);
         String userAgent = request.getHeader("User-Agent");
 
-        // Device enforcement: block if device already registered to another user
-        if (deviceFingerprint == null || deviceFingerprint.isBlank()) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", "Device fingerprint required"));
-        }
-        DeviceRegistry reg = deviceRegistryRepo.findByDeviceFingerprint(deviceFingerprint).orElse(null);
-        if (reg != null && (reg.getUser() == null || !reg.getUser().getEmail().equals(email))) {
-            logLoginAudit(null, clientIp, deviceFingerprint, userAgent, "BLOCKED: Device already registered");
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "One device can have only one account"));
-        }
-
-        // For viewers, check both VIEWER and USER roles (backward compatibility)
+        // Fetch user before device enforcement logic
         User user = userRepo.findByEmailAndRole(email, role).orElse(null);
         if (user == null && (role == Role.VIEWER || role == Role.USER)) {
             Role altRole = (role == Role.VIEWER) ? Role.USER : Role.VIEWER;
             user = userRepo.findByEmailAndRole(email, altRole).orElse(null);
+        }
+        if (user == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "User not found"));
+        }
+
+        // Device enforcement: allow updating device fingerprint if mismatched
+        if (deviceFingerprint == null || deviceFingerprint.isBlank()) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", "Device fingerprint is required for login"));
+        }
+        DeviceRegistry reg = deviceRegistryRepo.findByDeviceFingerprint(deviceFingerprint).orElse(null);
+        if (reg != null && (reg.getUser() == null || !reg.getUser().getEmail().equals(email))) {
+            logLoginAudit(null, clientIp, deviceFingerprint, userAgent, "Device mismatch detected. Updating device fingerprint.");
+            reg.setUser(user);
+            reg.setLastIp(clientIp);
+            reg.setLastSeenAt(java.time.LocalDateTime.now());
+            deviceRegistryRepo.save(reg);
         }
 
         if (user == null || !passwordEncoder.matches(password, user.getPassword())) {
@@ -232,23 +252,19 @@ public class AuthController {
             }
         }
 
-        // Update user device info
-        user.setDeviceFingerprint(deviceFingerprint);
+        // Update user fields
         user.setLastIp(clientIp);
+        user.setLastActive(java.time.LocalDateTime.now());
         userRepo.save(user);
 
-        // Register/update device registry
-        if (reg == null) {
-            reg = new DeviceRegistry();
-            reg.setDeviceFingerprint(deviceFingerprint);
-            reg.setUser(user);
-            reg.setRole(role.name());
-            reg.setFirstIp(clientIp);
-            reg.setCreatedAt(java.time.LocalDateTime.now());
-        }
-        reg.setLastIp(clientIp);
-        reg.setLastSeenAt(java.time.LocalDateTime.now());
-        deviceRegistryRepo.save(reg);
+        // Update device registry fields
+        DeviceRegistry deviceRegistry = deviceRegistryRepo.findByDeviceFingerprint(deviceFingerprint).orElse(new DeviceRegistry());
+        deviceRegistry.setUser(user);
+        deviceRegistry.setDeviceFingerprint(deviceFingerprint);
+        deviceRegistry.setFirstIp(clientIp);
+        deviceRegistry.setLastIp(clientIp);
+        deviceRegistry.setLastSeenAt(java.time.LocalDateTime.now());
+        deviceRegistryRepo.save(deviceRegistry);
 
         // Log audit
         logLoginAudit(user, clientIp, deviceFingerprint, userAgent, "LOGIN");

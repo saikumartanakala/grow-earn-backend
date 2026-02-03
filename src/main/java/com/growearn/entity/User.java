@@ -46,6 +46,15 @@ public class User {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
+    @Column(name = "last_active")
+    private LocalDateTime lastActive;
+
+    @Column(name = "joined")
+    private LocalDateTime joined;
+
+    @Column(name = "first_ip", length = 100)
+    private String firstIp;
+
     // Profile fields
     @Column(name = "full_name", length = 100)
     private String fullName;
@@ -92,6 +101,15 @@ public class User {
     public String getChannelName() { return channelName; }
     public String getProfilePicUrl() { return profilePicUrl; }
     public String getUpiId() { return upiId; }
+    public LocalDateTime getLastActive() {
+        return lastActive;
+    }
+    public LocalDateTime getJoined() {
+        return joined;
+    }
+    public String getFirstIp() {
+        return firstIp;
+    }
 
     // Setters
     public void setId(Long id) { this.id = id; }
@@ -131,6 +149,15 @@ public class User {
     public void setUpiId(String upiId) { 
         this.upiId = upiId; 
         this.updatedAt = LocalDateTime.now();
+    }
+    public void setLastActive(LocalDateTime lastActive) {
+        this.lastActive = lastActive;
+    }
+    public void setJoined(LocalDateTime joined) {
+        this.joined = joined;
+    }
+    public void setFirstIp(String firstIp) {
+        this.firstIp = firstIp;
     }
 
     // Helper methods

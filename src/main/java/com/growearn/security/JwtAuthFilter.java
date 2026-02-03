@@ -60,6 +60,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 sendUnauthorizedResponse(response, "Token has been revoked");
                 return;
             }
+            if (jwtUtil.isTokenExpired(token)) {
+                logSecurity("REJECT", "Token expired", null, request);
+                sendUnauthorizedResponse(response, "Session expired. Please log in again.");
+                return;
+            }
             Long userId = jwtUtil.extractUserId(token);
             String role = jwtUtil.extractRole(token);
             Optional<User> userOpt = userRepository.findById(userId);

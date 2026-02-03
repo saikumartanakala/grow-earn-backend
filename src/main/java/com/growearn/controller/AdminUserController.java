@@ -1,4 +1,3 @@
-
 package com.growearn.controller;
 import com.growearn.repository.DeviceRegistryRepository;
 import com.growearn.repository.LoginAuditRepository;
@@ -20,6 +19,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 
 @RestController
 @RequestMapping("/api/admin/users")
@@ -138,16 +140,55 @@ public class AdminUserController {
     }
 
     /**
-     * GET /api/admin/users
+     * GET /api/admin/users/all
      * List all users with their status
      */
-    @GetMapping
-    public ResponseEntity<?> getAllUsers() {
-        List<User> users = userService.findAllUsers();
-        List<UserDTO> userList = users.stream()
-            .map(this::userToDTO)
+    @GetMapping("/all")
+    public ResponseEntity<?> getAllUsers(@RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "10") int size) {
+        Pageable pageable = PageRequest.of(page, size);
+        Page<User> userPage = userService.findAllUsers(pageable);
+        List<UserDTO> userList = userPage.stream()
+            .map((User user) -> userToDTO(user))
             .collect(Collectors.toList());
-        return ResponseEntity.ok(userList);
+        return ResponseEntity.ok(Map.of(
+            "total", userPage.getTotalElements(),
+            "users", userList
+        ));
+    }
+
+    /**
+     * GET /api/admin/users
+     * List all users with their status and role filtering
+     */
+    @GetMapping
+    public ResponseEntity<?> getUsers(@RequestParam(defaultValue = "0") int page,
+                                      @RequestParam(defaultValue = "8") int size,
+                                      @RequestParam(defaultValue = "ALL") String role) {
+        try {
+            Pageable pageable = PageRequest.of(page, size);
+
+            Page<User> userPage;
+            if (role.equalsIgnoreCase("ALL")) {
+                userPage = userService.findAllUsers(pageable);
+            } else {
+                Role userRole = Role.valueOf(role.toUpperCase());
+                userPage = userService.findByRole(userRole, pageable);
+            }
+
+            List<UserDTO> userList = userPage.getContent().stream()
+                .map(this::userToDTO)
+                .collect(Collectors.toList());
+
+            return ResponseEntity.ok(Map.of(
+                "users", userList,
+                "total", userPage.getTotalElements(),
+                "totalPages", userPage.getTotalPages()
+            ));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid role: " + role));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", "Failed to fetch users", "message", e.getMessage()));
+        }
     }
 
     /**
@@ -166,17 +207,27 @@ public class AdminUserController {
      * List users by role (VIEWER, CREATOR, ADMIN)
      */
     @GetMapping("/role/{role}")
-    public ResponseEntity<?> getUsersByRole(@PathVariable String role) {
+    public ResponseEntity<?> getUsersByRole(@PathVariable String role,
+                                             @RequestParam(defaultValue = "0") int page,
+                                             @RequestParam(defaultValue = "10") int size) {
+        logger.info("Fetching users by role: " + role);
         try {
             Role r = Role.valueOf(role.toUpperCase());
-            List<User> users = userService.findByRole(r);
-            List<UserDTO> userList = users.stream()
+            Pageable pageable = PageRequest.of(page, size);
+            Page<User> userPage = userService.findByRole(r, pageable);
+            logger.info("Users fetched: " + userPage.getTotalElements());
+            List<UserDTO> userList = userPage.getContent().stream()
                 .map(this::userToDTO)
                 .collect(Collectors.toList());
-            return ResponseEntity.ok(userList);
+            return ResponseEntity.ok(Map.of(
+                "users", userList,
+                "total", userPage.getTotalElements(),
+                "totalPages", userPage.getTotalPages()
+            ));
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest()
-                .body(Map.of("error", "Invalid role: " + role));
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid role: " + role));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", "Failed to fetch users", "message", e.getMessage()));
         }
     }
 
@@ -683,15 +734,18 @@ public class AdminUserController {
     }
 
     private UserDTO userToDTO(User user) {
-        return new UserDTO(
+        logger.info("Transforming user to DTO: " + user);
+        UserDTO dto = new UserDTO(
             user.getId(),
             user.getEmail(),
-            user.getRole() != null ? user.getRole().name() : null,
-            user.getStatus() != null ? user.getStatus().name() : "ACTIVE",
-            user.getIsVerified() != null ? user.getIsVerified() : false,
+            user.getRole().name(),
+            user.getStatus().name(),
+            user.getIsVerified(),
             user.getSuspensionUntil() != null ? user.getSuspensionUntil().toString() : null,
             user.getCreatedAt() != null ? user.getCreatedAt().toString() : null,
-            userService.canUserLogin(user)
+            user.getStatus() == AccountStatus.ACTIVE
         );
+        logger.info("DTO created: " + dto);
+        return dto;
     }
 }

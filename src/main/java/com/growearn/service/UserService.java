@@ -8,6 +8,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Page;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -42,12 +44,15 @@ public class UserService {
         return userRepository.findByEmail(email);
     }
 
-    public List<User> findByRole(Role role) {
-        return userRepository.findByRole(role);
+    public Page<User> findByRole(Role role, Pageable pageable) {
+        logger.info("Fetching users with role: " + role);
+        Page<User> userPage = userRepository.findByRole(role, pageable);
+        logger.info("Number of users fetched for role " + role + ": " + userPage.getTotalElements());
+        return userPage;
     }
 
-    public List<User> findAllUsers() {
-        return userRepository.findAll();
+    public Page<User> findAllUsers(Pageable pageable) {
+        return userRepository.findAll(pageable);
     }
 
     /**
