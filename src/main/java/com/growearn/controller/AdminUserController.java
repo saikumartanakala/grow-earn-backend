@@ -748,4 +748,10 @@ public class AdminUserController {
         logger.info("DTO created: " + dto);
         return dto;
     }
+
+    @GetMapping("/debug/users")
+    public ResponseEntity<?> getAllUsersDebug() {
+        List<User> users = userService.findAll();
+        return ResponseEntity.ok(users);
+    }
 }

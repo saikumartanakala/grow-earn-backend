@@ -19,6 +19,10 @@ import java.util.Optional;
 public class UserService {
 
     public User save(User user) {
+        // Ensure role is stored as USER for viewers
+        if (user.getRole() == Role.VIEWER) {
+            user.setRole(Role.USER);
+        }
         return userRepository.save(user);
     }
 
@@ -45,6 +49,10 @@ public class UserService {
     }
 
     public Page<User> findByRole(Role role, Pageable pageable) {
+        // Map VIEWER role to USER for database query
+        if (role == Role.VIEWER) {
+            role = Role.USER;
+        }
         logger.info("Fetching users with role: " + role);
         Page<User> userPage = userRepository.findByRole(role, pageable);
         logger.info("Number of users fetched for role " + role + ": " + userPage.getTotalElements());
@@ -53,6 +61,10 @@ public class UserService {
 
     public Page<User> findAllUsers(Pageable pageable) {
         return userRepository.findAll(pageable);
+    }
+
+    public List<User> findAll() {
+        return userRepository.findAll();
     }
 
     /**

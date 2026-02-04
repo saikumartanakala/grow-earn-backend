@@ -132,3 +132,8 @@ CREATE TABLE IF NOT EXISTS `earnings` (
 
 -- Create default admin user (password: admin123 - should be changed in production)
 -- INSERT IGNORE INTO users (email, password, role) VALUES ('admin@growearn.com', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZRGdjGj/n3.H8BjZL1GJoI1n1ADmO', 'ADMIN');
+
+-- Insert test viewer users with default passwords
+INSERT INTO users (email, password, role, status, is_verified, suspension_until) 
+VALUES ('viewer1@example.com', 'defaultPassword123', 'VIEWER', 'ACTIVE', true, NULL),
+       ('viewer2@example.com', 'defaultPassword123', 'VIEWER', 'ACTIVE', false, NULL);
