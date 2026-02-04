@@ -112,6 +112,38 @@ CREATE TABLE IF NOT EXISTS `viewer_tasks` (
   CONSTRAINT `fk_viewer_tasks_task` FOREIGN KEY (`task_id`) REFERENCES `tasks`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- ===============================
+-- EXTEND VIEWER_TASKS FOR VERIFICATION PIPELINE
+-- ===============================
+-- Add new fields for proof handling and verification
+ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `proof_url` VARCHAR(500);
+ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `proof_public_id` VARCHAR(255);
+ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `proof_text` TEXT;
+ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `proof_hash` VARCHAR(64);
+
+-- Add risk analysis fields
+ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `risk_score` DOUBLE DEFAULT 0.0;
+ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `auto_flag` BOOLEAN DEFAULT FALSE;
+
+-- Add hold period fields
+ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `approved_at` TIMESTAMP NULL;
+ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `hold_start_time` TIMESTAMP NULL;
+ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `hold_end_time` TIMESTAMP NULL;
+
+-- Add payment tracking fields
+ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `paid_at` TIMESTAMP NULL;
+ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `payment_txn_id` VARCHAR(100);
+
+-- Add device and IP tracking
+ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `device_fingerprint` VARCHAR(255);
+ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `ip_address` VARCHAR(100);
+
+-- Add indexes for verification queries
+CREATE INDEX IF NOT EXISTS `idx_viewer_tasks_proof_hash` ON `viewer_tasks`(`proof_hash`);
+CREATE INDEX IF NOT EXISTS `idx_viewer_tasks_hold_end` ON `viewer_tasks`(`hold_end_time`);
+CREATE INDEX IF NOT EXISTS `idx_viewer_tasks_paid_at` ON `viewer_tasks`(`paid_at`);
+CREATE INDEX IF NOT EXISTS `idx_viewer_tasks_risk` ON `viewer_tasks`(`risk_score`, `auto_flag`);
+
 CREATE TABLE IF NOT EXISTS `wallet` (
   `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `viewer_id` BIGINT NOT NULL UNIQUE,

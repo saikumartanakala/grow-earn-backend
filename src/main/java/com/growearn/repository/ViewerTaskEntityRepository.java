@@ -8,6 +8,10 @@ import java.util.List;
 
 public interface ViewerTaskEntityRepository extends JpaRepository<ViewerTaskEntity, Long> {
     List<ViewerTaskEntity> findByStatus(String status);
+    
+    // Find tasks by status ordered by submitted date DESC (newest first)
+    List<ViewerTaskEntity> findByStatusOrderBySubmittedAtDesc(String status);
+    
     List<ViewerTaskEntity> findByViewerId(Long viewerId);
     java.util.Optional<ViewerTaskEntity> findByTaskIdAndViewerId(Long taskId, Long viewerId);
     long countByViewerIdAndStatus(Long viewerId, String status);

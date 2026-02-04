@@ -1,5 +1,6 @@
 package com.growearn.controller;
 
+import com.growearn.dto.TaskSubmissionRequest;
 import com.growearn.service.ViewerTaskFlowService;
 import com.growearn.entity.ViewerTaskEntity;
 import com.growearn.entity.Earning;
@@ -10,6 +11,8 @@ import com.growearn.repository.EarningRepository;
 import com.growearn.repository.WalletRepository;
 import com.growearn.entity.TaskEntity;
 import com.growearn.entity.WalletEntity;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Map;
@@ -20,6 +23,8 @@ import java.util.HashMap;
 @RequestMapping("/api/viewer/tasks")
 @CrossOrigin(origins = {"http://localhost:5173", "http://192.168.55.104:5173"}, allowCredentials = "true")
 public class ViewerTaskController {
+
+    private static final Logger logger = LoggerFactory.getLogger(ViewerTaskController.class);
 
     private final ViewerTaskFlowService viewerTaskFlowService;
     private final JwtUtil jwtUtil;
@@ -40,6 +45,72 @@ public class ViewerTaskController {
         this.earningRepository = earningRepository;
         this.walletRepository = walletRepository;
         this.campaignRepository = campaignRepository;
+    }
+
+    /**
+     * STAGE 1: Submit task with proof (NEW VERIFICATION PIPELINE)
+     * POST /api/viewer/tasks/submit-with-proof
+     */
+    @PostMapping("/submit-with-proof")
+    public Map<String, Object> submitTaskWithProof(@RequestBody TaskSubmissionRequest request, 
+                                                     HttpServletRequest httpRequest) {
+        try {
+            // Extract viewer ID from token
+            String auth = httpRequest.getHeader("Authorization");
+            if (auth == null || !auth.startsWith("Bearer ")) {
+                return Map.of("success", false, "message", "Missing or invalid authorization token");
+            }
+            Long viewerId = jwtUtil.extractUserId(auth.substring(7));
+
+            // Extract IP address
+            String ipAddress = extractIpAddress(httpRequest);
+
+            // Validate request
+            if (request.getTaskId() == null) {
+                return Map.of("success", false, "message", "Task ID is required");
+            }
+            if (request.getProofUrl() == null || request.getProofUrl().trim().isEmpty()) {
+                return Map.of("success", false, "message", "Proof URL is required");
+            }
+
+            logger.info("Task submission received from viewer {}: taskId={}, proofUrl={}", 
+                       viewerId, request.getTaskId(), request.getProofUrl());
+
+            // Submit task with proof and risk analysis
+            Map<String, Object> result = viewerTaskFlowService.submitTaskWithProof(
+                request.getTaskId(),
+                viewerId,
+                request.getProofUrl(),
+                request.getProofPublicId(),
+                request.getProofText(),
+                request.getDeviceFingerprint(),
+                ipAddress
+            );
+
+            return result;
+
+        } catch (Exception e) {
+            logger.error("Error submitting task with proof", e);
+            return Map.of("success", false, "message", e.getMessage());
+        }
+    }
+
+    /**
+     * Extract IP address from request
+     */
+    private String extractIpAddress(HttpServletRequest request) {
+        String ipAddress = request.getHeader("X-Forwarded-For");
+        if (ipAddress == null || ipAddress.isEmpty() || "unknown".equalsIgnoreCase(ipAddress)) {
+            ipAddress = request.getHeader("X-Real-IP");
+        }
+        if (ipAddress == null || ipAddress.isEmpty() || "unknown".equalsIgnoreCase(ipAddress)) {
+            ipAddress = request.getRemoteAddr();
+        }
+        // If multiple IPs in X-Forwarded-For, take the first one
+        if (ipAddress != null && ipAddress.contains(",")) {
+            ipAddress = ipAddress.split(",")[0].trim();
+        }
+        return ipAddress;
     }
 
     /**
@@ -146,21 +217,49 @@ public class ViewerTaskController {
     }
 
     @PostMapping("/submit")
-    public ViewerTaskEntity submitTask(@RequestBody Map<String, Object> body, HttpServletRequest req) {
-        // Accept either "taskId" or "id" from the request
-        Long taskId = null;
-        if (body.containsKey("taskId")) {
-            taskId = Long.valueOf(String.valueOf(body.get("taskId")));
-        } else if (body.containsKey("id")) {
-            taskId = Long.valueOf(String.valueOf(body.get("id")));
+    public Map<String, Object> submitTask(@RequestBody Map<String, Object> body, HttpServletRequest req) {
+        try {
+            // Accept either "taskId" or "id" from the request
+            Long taskId = null;
+            if (body.containsKey("taskId")) {
+                taskId = Long.valueOf(String.valueOf(body.get("taskId")));
+            } else if (body.containsKey("id")) {
+                taskId = Long.valueOf(String.valueOf(body.get("id")));
+            }
+            if (taskId == null) {
+                return Map.of("success", false, "message", "Task ID is required");
+            }
+            
+            String auth = req.getHeader("Authorization");
+            if (auth == null || !auth.startsWith("Bearer ")) {
+                return Map.of("success", false, "message", "Missing token");
+            }
+            Long viewerId = jwtUtil.extractUserId(auth.substring(7));
+            
+            // Check if proof data is provided (new verification pipeline)
+            if (body.containsKey("proofUrl") && body.get("proofUrl") != null) {
+                String proofUrl = String.valueOf(body.get("proofUrl"));
+                String proofPublicId = body.containsKey("publicId") ? String.valueOf(body.get("publicId")) : null;
+                String proofText = body.containsKey("proofText") ? String.valueOf(body.get("proofText")) : null;
+                String deviceFingerprint = req.getHeader("X-Device-Fingerprint");
+                String ipAddress = extractIpAddress(req);
+                
+                logger.info("Task submission with proof: taskId={}, viewerId={}, proofUrl={}", 
+                           taskId, viewerId, proofUrl);
+                
+                // Use new verification pipeline
+                return viewerTaskFlowService.submitTaskWithProof(
+                    taskId, viewerId, proofUrl, proofPublicId, proofText, deviceFingerprint, ipAddress
+                );
+            } else {
+                // Legacy: Use completeTask which handles grab+submit in one transaction
+                ViewerTaskEntity result = viewerTaskFlowService.completeTask(taskId, viewerId);
+                return Map.of("success", true, "message", "Task completed", "taskId", result.getId());
+            }
+        } catch (Exception e) {
+            logger.error("Error submitting task", e);
+            return Map.of("success", false, "message", e.getMessage());
         }
-        if (taskId == null) throw new RuntimeException("Task ID is required");
-        
-        String auth = req.getHeader("Authorization");
-        if (auth == null || !auth.startsWith("Bearer ")) throw new RuntimeException("Missing token");
-        Long viewerId = jwtUtil.extractUserId(auth.substring(7));
-        // Use completeTask which handles grab+submit in one transaction
-        return viewerTaskFlowService.completeTask(taskId, viewerId);
     }
 
     /**

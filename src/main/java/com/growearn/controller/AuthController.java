@@ -222,6 +222,7 @@ public class AuthController {
         if (reg != null && (reg.getUser() == null || !reg.getUser().getEmail().equals(email))) {
             logLoginAudit(null, clientIp, deviceFingerprint, userAgent, "Device mismatch detected. Updating device fingerprint.");
             reg.setUser(user);
+            reg.setRole(user.getRole().name());
             reg.setLastIp(clientIp);
             reg.setLastSeenAt(java.time.LocalDateTime.now());
             deviceRegistryRepo.save(reg);
@@ -261,6 +262,7 @@ public class AuthController {
         DeviceRegistry deviceRegistry = deviceRegistryRepo.findByDeviceFingerprint(deviceFingerprint).orElse(new DeviceRegistry());
         deviceRegistry.setUser(user);
         deviceRegistry.setDeviceFingerprint(deviceFingerprint);
+        deviceRegistry.setRole(user.getRole().name());
         deviceRegistry.setFirstIp(clientIp);
         deviceRegistry.setLastIp(clientIp);
         deviceRegistry.setLastSeenAt(java.time.LocalDateTime.now());

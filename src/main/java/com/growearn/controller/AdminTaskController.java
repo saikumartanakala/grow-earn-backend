@@ -3,14 +3,17 @@ package com.growearn.controller;
 import com.growearn.entity.*;
 import com.growearn.service.ViewerTaskFlowService;
 import com.growearn.service.TaskService;
+import com.growearn.service.UserViolationService;
 import com.growearn.repository.*;
 import com.growearn.security.JwtUtil;
+import com.growearn.dto.*;
 import org.springframework.web.bind.annotation.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/admin/tasks")
@@ -28,6 +31,7 @@ public class AdminTaskController {
     private final WalletRepository walletRepository;
     private final EarningRepository earningRepository;
     private final CreatorStatsRepository creatorStatsRepository;
+    private final UserViolationService userViolationService;
     private final JwtUtil jwtUtil;
 
     public AdminTaskController(ViewerTaskEntityRepository viewerTaskRepository, 
@@ -39,6 +43,7 @@ public class AdminTaskController {
                                WalletRepository walletRepository,
                                EarningRepository earningRepository,
                                CreatorStatsRepository creatorStatsRepository,
+                               UserViolationService userViolationService,
                                JwtUtil jwtUtil) {
         this.viewerTaskRepository = viewerTaskRepository;
         this.viewerTaskService = viewerTaskService;
@@ -49,11 +54,49 @@ public class AdminTaskController {
         this.walletRepository = walletRepository;
         this.earningRepository = earningRepository;
         this.creatorStatsRepository = creatorStatsRepository;
+        this.userViolationService = userViolationService;
         this.jwtUtil = jwtUtil;
     }
 
     /**
-     * GET /api/admin/tasks/pending
+     * GET /api/admin/tasks?status={status}
+     * Get tasks filtered by status (pending, on-hold, paid, rejected)
+     * Status mapping: pending -> UNDER_VERIFICATION, on-hold -> HOLD
+     */
+    @GetMapping
+    public List<AdminTaskDTO> getTasksByStatus(@RequestParam(required = false) String status) {
+        logger.info("Admin requested tasks with status: {}", status);
+        
+        List<ViewerTaskEntity> tasks;
+        if (status != null && !status.isEmpty()) {
+            // Map frontend status to backend status
+            String backendStatus = mapFrontendStatus(status);
+            logger.info("Mapped frontend status '{}' to backend status '{}'", status, backendStatus);
+            // Use repository method with built-in ordering
+            tasks = viewerTaskRepository.findByStatusOrderBySubmittedAtDesc(backendStatus);
+            logger.info("Found {} tasks with status '{}'", tasks.size(), backendStatus);
+        } else {
+            tasks = viewerTaskRepository.findAll();
+            logger.info("Found {} total tasks", tasks.size());
+            // Sort manually when fetching all
+            tasks.sort((t1, t2) -> {
+                if (t1.getSubmittedAt() == null && t2.getSubmittedAt() == null) return 0;
+                if (t1.getSubmittedAt() == null) return 1;
+                if (t2.getSubmittedAt() == null) return -1;
+                return t2.getSubmittedAt().compareTo(t1.getSubmittedAt());
+            });
+        }
+        
+        List<AdminTaskDTO> result = tasks.stream()
+                .map(this::convertToAdminTaskDTO)
+                .collect(Collectors.toList());
+        
+        logger.info("Returning {} task DTOs to frontend", result.size());
+        return result;
+    }
+    
+    /**
+     * GET /api/admin/tasks/pending (legacy support)
      * Get all tasks under verification with viewer and task details
      */
     @GetMapping("/pending")
@@ -111,11 +154,62 @@ public class AdminTaskController {
 
     /**
      * POST /api/admin/tasks/approve
-     * Approve a task and credit earnings to viewer
-     * Accepts: { "taskId": 123 } or { "viewerTaskId": 123 }
+     * Approve a task and move to HOLD status (no payment yet)
+     * Accepts: { "taskId": "123" }
      */
     @PostMapping("/approve")
-    public Map<String, Object> approveTask(@RequestBody Map<String, Object> body, HttpServletRequest req) {
+    public Map<String, Object> approveTask(@RequestBody TaskApproveRequestDTO request, HttpServletRequest req) {
+        Long adminId = extractAdminId(req);
+        
+        if (request.getTaskId() == null || request.getTaskId().isEmpty()) {
+            return Map.of("success", false, "error", "missing_taskId", "message", "Task ID is required");
+        }
+        
+        Long viewerTaskId;
+        try {
+            viewerTaskId = Long.parseLong(request.getTaskId());
+        } catch (NumberFormatException e) {
+            return Map.of("success", false, "error", "invalid_taskId", "message", "Task ID must be a number");
+        }
+
+        logger.info("Admin {} approving viewerTaskId={}", adminId, viewerTaskId);
+
+        ViewerTaskEntity vt = viewerTaskRepository.findById(viewerTaskId).orElse(null);
+        if (vt == null) {
+            return Map.of("success", false, "error", "not_found", "message", "Task not found");
+        }
+
+        if (!"UNDER_VERIFICATION".equalsIgnoreCase(vt.getStatus())) {
+            return Map.of("success", false, "error", "invalid_status", 
+                         "message", "Task is not under verification. Current status: " + vt.getStatus());
+        }
+
+        // Move to HOLD status (48 hours default)
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime holdEndTime = now.plusHours(48);
+        
+        vt.setStatus("HOLD");
+        vt.setApprovedAt(now);
+        vt.setApprovedBy(adminId);
+        vt.setHoldStartTime(now);
+        vt.setHoldEndTime(holdEndTime);
+        viewerTaskRepository.save(vt);
+
+        logger.info("Task {} approved and moved to HOLD until {}", viewerTaskId, holdEndTime);
+
+        return Map.of(
+            "success", true,
+            "message", "Task approved, now on hold",
+            "holdEndTime", holdEndTime.toString()
+        );
+    }
+    
+    /**
+     * POST /api/admin/tasks/approve (legacy support)
+     * Old approve method that directly credits wallet
+     */
+    @PostMapping("/approve-legacy")
+    public Map<String, Object> approveTaskLegacy(@RequestBody Map<String, Object> body, HttpServletRequest req) {
         Long adminId = extractAdminId(req);
         
         Long viewerTaskId = extractId(body, "viewerTaskId", "taskId", "id");
@@ -123,7 +217,7 @@ public class AdminTaskController {
             return Map.of("success", false, "error", "missing_taskId", "message", "Task ID is required");
         }
 
-        logger.info("Admin {} approving viewerTaskId={}", adminId, viewerTaskId);
+        logger.info("Admin {} approving viewerTaskId={} (legacy)", adminId, viewerTaskId);
 
         ViewerTaskEntity vt = viewerTaskRepository.findById(viewerTaskId).orElse(null);
         if (vt == null) {
@@ -179,20 +273,28 @@ public class AdminTaskController {
 
     /**
      * POST /api/admin/tasks/reject
-     * Reject a task with a reason
+     * Reject a task with a reason and add strike to viewer
      */
     @PostMapping("/reject")
-    public Map<String, Object> rejectTask(@RequestBody Map<String, Object> body, HttpServletRequest req) {
+    public Map<String, Object> rejectTask(@RequestBody TaskRejectRequestDTO request, HttpServletRequest req) {
         Long adminId = extractAdminId(req);
         
-        Long viewerTaskId = extractId(body, "viewerTaskId", "taskId", "id");
-        if (viewerTaskId == null) {
+        if (request.getTaskId() == null || request.getTaskId().isEmpty()) {
             return Map.of("success", false, "error", "missing_taskId", "message", "Task ID is required");
         }
+        
+        if (request.getReason() == null || request.getReason().isEmpty()) {
+            return Map.of("success", false, "error", "missing_reason", "message", "Rejection reason is required");
+        }
+        
+        Long viewerTaskId;
+        try {
+            viewerTaskId = Long.parseLong(request.getTaskId());
+        } catch (NumberFormatException e) {
+            return Map.of("success", false, "error", "invalid_taskId", "message", "Task ID must be a number");
+        }
 
-        String reason = body.containsKey("reason") ? String.valueOf(body.get("reason")) : "No reason provided";
-
-        logger.info("Admin {} rejecting viewerTaskId={} with reason: {}", adminId, viewerTaskId, reason);
+        logger.info("Admin {} rejecting viewerTaskId={} with reason: {}", adminId, viewerTaskId, request.getReason());
 
         ViewerTaskEntity vt = viewerTaskRepository.findById(viewerTaskId).orElse(null);
         if (vt == null) {
@@ -204,13 +306,99 @@ public class AdminTaskController {
         }
 
         vt.setStatus("REJECTED");
-        vt.setRejectionReason(reason);
+        vt.setRejectionReason(request.getReason());
         vt.setApprovedBy(adminId);
         viewerTaskRepository.save(vt);
+        
+        // Add strike to viewer for fraudulent submission
+        try {
+            userViolationService.strikeUser(vt.getViewerId(), "Task Rejection", 
+                "Task rejected: " + request.getReason(), adminId);
+        } catch (Exception e) {
+            logger.error("Error adding strike to viewer {}: {}", vt.getViewerId(), e.getMessage());
+        }
 
-        logger.info("Task {} rejected", viewerTaskId);
+        logger.info("Task {} rejected and strike added to viewer {}", viewerTaskId, vt.getViewerId());
 
-        return Map.of("success", true, "message", "Task rejected", "taskId", viewerTaskId, "reason", reason);
+        return Map.of("success", true, "message", "Task rejected", "taskId", viewerTaskId);
+    }
+
+    /**
+     * POST /api/admin/tasks/mark-paid
+     * Mark task as paid and credit viewer wallet
+     * This is the ONLY place where wallet updates happen
+     */
+    @PostMapping("/mark-paid")
+    public Map<String, Object> markTaskPaid(@RequestBody TaskMarkPaidRequestDTO request, HttpServletRequest req) {
+        Long adminId = extractAdminId(req);
+        
+        if (request.getTaskId() == null || request.getTaskId().isEmpty()) {
+            return Map.of("success", false, "error", "missing_taskId", "message", "Task ID is required");
+        }
+        
+        Long viewerTaskId;
+        try {
+            viewerTaskId = Long.parseLong(request.getTaskId());
+        } catch (NumberFormatException e) {
+            return Map.of("success", false, "error", "invalid_taskId", "message", "Task ID must be a number");
+        }
+
+        logger.info("Admin {} marking viewerTaskId={} as paid", adminId, viewerTaskId);
+
+        ViewerTaskEntity vt = viewerTaskRepository.findById(viewerTaskId).orElse(null);
+        if (vt == null) {
+            return Map.of("success", false, "error", "not_found", "message", "Task not found");
+        }
+
+        if (!"HOLD".equalsIgnoreCase(vt.getStatus())) {
+            return Map.of("success", false, "error", "invalid_status", 
+                         "message", "Task is not on hold. Current status: " + vt.getStatus());
+        }
+
+        TaskEntity task = taskRepository.findById(vt.getTaskId()).orElse(null);
+        if (task == null) {
+            return Map.of("success", false, "error", "task_not_found", "message", "Associated task not found");
+        }
+        
+        double reward = task.getEarning() != null ? task.getEarning() : 0.0;
+
+        // Update task status to PAID
+        vt.setStatus("PAID");
+        vt.setPaidAt(LocalDateTime.now());
+        vt.setPaymentTxnId(generateTxnId());
+        viewerTaskRepository.save(vt);
+
+        // Credit viewer wallet
+        WalletEntity wallet = walletRepository.findByViewerId(vt.getViewerId()).orElseGet(() -> {
+            WalletEntity newWallet = new WalletEntity();
+            newWallet.setViewerId(vt.getViewerId());
+            newWallet.setBalance(0.0);
+            return walletRepository.save(newWallet);
+        });
+        wallet.setBalance(wallet.getBalance() + reward);
+        walletRepository.save(wallet);
+
+        // Record earning
+        Earning earning = new Earning();
+        earning.setViewerId(vt.getViewerId());
+        earning.setAmount(reward);
+        earning.setDescription("Task paid: " + task.getTaskType() + " - " + vt.getPaymentTxnId());
+        earning.setCreatedAt(LocalDateTime.now());
+        earningRepository.save(earning);
+
+        // Update campaign and creator stats
+        if (task.getCampaignId() != null) {
+            updateCampaignStats(task);
+        }
+
+        logger.info("Task {} marked as PAID. Credited {} to viewer {}", viewerTaskId, reward, vt.getViewerId());
+
+        return Map.of(
+            "success", true,
+            "message", "Task marked as paid, wallet updated",
+            "earning", reward,
+            "txnId", vt.getPaymentTxnId()
+        );
     }
 
     /**
@@ -237,6 +425,73 @@ public class AdminTaskController {
     }
 
     // ========== Helper Methods ==========
+    
+    /**
+     * Map frontend status to backend status
+     */
+    private String mapFrontendStatus(String frontendStatus) {
+        return switch (frontendStatus.toLowerCase()) {
+            case "pending" -> "UNDER_VERIFICATION";
+            case "on-hold" -> "HOLD";
+            case "paid" -> "PAID";
+            case "rejected" -> "REJECTED";
+            default -> frontendStatus.toUpperCase();
+        };
+    }
+    
+    /**
+     * Convert ViewerTaskEntity to AdminTaskDTO
+     */
+    private AdminTaskDTO convertToAdminTaskDTO(ViewerTaskEntity vt) {
+        AdminTaskDTO dto = new AdminTaskDTO();
+        dto.setId(vt.getId());
+        dto.setProofUrl(vt.getProofUrl());
+        dto.setPublicId(vt.getProofPublicId());
+        dto.setProofText(vt.getProofText());
+        dto.setRiskScore(vt.getRiskScore() != null ? vt.getRiskScore() : 0.0);
+        dto.setStatus(vt.getStatus());
+        dto.setSubmittedAt(vt.getSubmittedAt());
+        
+        // DEBUG: Log proof data
+        logger.info("Converting task {}: proofUrl={}, publicId={}, proofText={}", 
+                   vt.getId(), vt.getProofUrl(), vt.getProofPublicId(), vt.getProofText());
+        
+        // Get task details
+        TaskEntity task = taskRepository.findById(vt.getTaskId()).orElse(null);
+        if (task != null) {
+            dto.setTitle(task.getTaskType());
+            dto.setTaskType(task.getTaskType());
+            dto.setTargetLink(task.getTargetLink());
+            dto.setEarning(task.getEarning());
+            
+            if (task.getCampaignId() != null) {
+                dto.setCampaignId(task.getCampaignId().toString());
+            }
+        }
+        
+        // Get viewer details
+        User viewer = userRepository.findById(vt.getViewerId()).orElse(null);
+        if (viewer != null) {
+            AdminTaskDTO.ViewerInfoDTO viewerInfo = new AdminTaskDTO.ViewerInfoDTO();
+            viewerInfo.setId(viewer.getId());
+            // Use fullName if available, otherwise use email
+            String displayName = (viewer.getFullName() != null && !viewer.getFullName().isEmpty()) 
+                ? viewer.getFullName() 
+                : viewer.getEmail();
+            viewerInfo.setName(displayName);
+            viewerInfo.setEmail(viewer.getEmail());
+            dto.setViewer(viewerInfo);
+        }
+        
+        return dto;
+    }
+    
+    /**
+     * Generate unique transaction ID
+     */
+    private String generateTxnId() {
+        return "TXN-" + System.currentTimeMillis() + "-" + (int)(Math.random() * 10000);
+    }
 
     private List<Map<String, Object>> enrichTasksWithDetails(List<ViewerTaskEntity> viewerTasks) {
         List<Map<String, Object>> result = new ArrayList<>();

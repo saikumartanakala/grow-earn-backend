@@ -1,5 +1,5 @@
-package com.growearn.service;
 
+package com.growearn.service;
 import com.growearn.entity.*;
 import com.growearn.repository.RevokedTokenRepository;
 import com.growearn.repository.UserRepository;
