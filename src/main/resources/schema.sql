@@ -80,6 +80,44 @@ CREATE TABLE IF NOT EXISTS `revoked_tokens` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ===============================
+-- CAMPAIGNS TABLE
+-- ===============================
+CREATE TABLE IF NOT EXISTS `campaigns` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `creator_id` BIGINT NOT NULL,
+  `title` VARCHAR(255),
+  `description` TEXT,
+  `platform` ENUM('YOUTUBE', 'INSTAGRAM', 'FACEBOOK', 'TWITTER') NOT NULL DEFAULT 'YOUTUBE',
+  `goal_type` VARCHAR(20),
+  `channel_name` VARCHAR(255),
+  `channel_link` VARCHAR(500),
+  `content_type` VARCHAR(20),
+  `video_link` VARCHAR(500),
+  `video_duration` VARCHAR(20),
+  `subscriber_goal` INT DEFAULT 0,
+  `views_goal` INT DEFAULT 0,
+  `likes_goal` INT DEFAULT 0,
+  `comments_goal` INT DEFAULT 0,
+  `current_subscribers` INT DEFAULT 0,
+  `current_views` INT DEFAULT 0,
+  `current_likes` INT DEFAULT 0,
+  `current_comments` INT DEFAULT 0,
+  `subscriber_task_count` INT DEFAULT 0,
+  `views_task_count` INT DEFAULT 0,
+  `likes_task_count` INT DEFAULT 0,
+  `comments_task_count` INT DEFAULT 0,
+  `total_amount` DOUBLE DEFAULT 0,
+  `goal_amount` DOUBLE DEFAULT 0,
+  `current_amount` DOUBLE DEFAULT 0,
+  `status` VARCHAR(32) DEFAULT 'ACTIVE',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_campaigns_creator_id` (`creator_id`),
+  INDEX `idx_campaigns_platform` (`platform`),
+  INDEX `idx_campaigns_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ===============================
 -- TASKS TABLE
 -- ===============================
 CREATE TABLE IF NOT EXISTS `tasks` (
@@ -98,6 +136,9 @@ CREATE TABLE IF NOT EXISTS `viewer_tasks` (
   `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `task_id` BIGINT NOT NULL,
   `viewer_id` BIGINT NOT NULL,
+  `platform` ENUM('YOUTUBE', 'INSTAGRAM', 'FACEBOOK', 'TWITTER') NOT NULL DEFAULT 'YOUTUBE',
+  `task_type` ENUM('FOLLOW', 'VIEW_LONG', 'VIEW_SHORT', 'LIKE', 'COMMENT') NOT NULL,
+  `target_url` VARCHAR(500),
   `status` VARCHAR(32) DEFAULT 'ASSIGNED',
   `proof` TEXT,
   `assigned_at` TIMESTAMP NULL,
@@ -109,6 +150,8 @@ CREATE TABLE IF NOT EXISTS `viewer_tasks` (
   INDEX `idx_viewer_tasks_status` (`status`),
   INDEX `idx_viewer_tasks_viewer_status` (`viewer_id`, `status`),
   INDEX `idx_viewer_tasks_task_id` (`task_id`),
+  INDEX `idx_viewer_tasks_platform` (`platform`),
+  INDEX `idx_viewer_tasks_task_type` (`task_type`),
   CONSTRAINT `fk_viewer_tasks_task` FOREIGN KEY (`task_id`) REFERENCES `tasks`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

@@ -20,7 +20,10 @@ public class Campaign {
     private double currentAmount;
     private LocalDateTime updatedAt;
 
-    private String platform; // YOUTUBE
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private Platform platform = Platform.YOUTUBE; // Default to YOUTUBE for backward compatibility
+    
     private String goalType; // S | V | L | C | SVLC
 
     private String channelName;
@@ -83,8 +86,8 @@ public class Campaign {
     public Long getCreatorId() { return creatorId; }
     public void setCreatorId(Long creatorId) { this.creatorId = creatorId; }
 
-    public String getPlatform() { return platform; }
-    public void setPlatform(String platform) { this.platform = platform; }
+    public Platform getPlatform() { return platform; }
+    public void setPlatform(Platform platform) { this.platform = platform; }
 
     public String getGoalType() { return goalType; }
     public void setGoalType(String goalType) { this.goalType = goalType; }

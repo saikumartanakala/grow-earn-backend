@@ -25,6 +25,7 @@ public class ViewerTaskFlowService {
     private final CreatorStatsRepository creatorStatsRepository;
     private final RiskAnalysisService riskAnalysisService;
     private final UserViolationService userViolationService;
+    private final PlatformTaskMapper platformTaskMapper;
 
     public ViewerTaskFlowService(TaskRepository taskRepository,
                                  ViewerTaskEntityRepository viewerTaskEntityRepository,
@@ -33,7 +34,8 @@ public class ViewerTaskFlowService {
                                  CampaignRepository campaignRepository,
                                  CreatorStatsRepository creatorStatsRepository,
                                  RiskAnalysisService riskAnalysisService,
-                                 UserViolationService userViolationService) {
+                                 UserViolationService userViolationService,
+                                 PlatformTaskMapper platformTaskMapper) {
         this.taskRepository = taskRepository;
         this.viewerTaskEntityRepository = viewerTaskEntityRepository;
         this.earningRepository = earningRepository;
@@ -42,6 +44,7 @@ public class ViewerTaskFlowService {
         this.creatorStatsRepository = creatorStatsRepository;
         this.riskAnalysisService = riskAnalysisService;
         this.userViolationService = userViolationService;
+        this.platformTaskMapper = platformTaskMapper;
     }
 
     public List<TaskEntity> getActiveTasks() {
@@ -180,10 +183,11 @@ public class ViewerTaskFlowService {
         w.setBalance(w.getBalance() + reward);
         walletRepository.save(w);
 
-        // 5) Update campaigns counters
+        // 5) Update campaigns counters (normalize task type for legacy compatibility)
         Campaign c = campaignRepository.findById(t.getCampaignId()).orElseThrow(() -> new RuntimeException("Campaign not found"));
-        switch (t.getTaskType()) {
-            case "SUBSCRIBE" -> c.setCurrentSubscribers(c.getCurrentSubscribers() + 1);
+        String normalizedType = normalizeTaskType(t.getTaskType());
+        switch (normalizedType) {
+            case "FOLLOW" -> c.setCurrentSubscribers(c.getCurrentSubscribers() + 1);
             case "VIEW" -> c.setCurrentViews(c.getCurrentViews() + 1);
             case "LIKE" -> c.setCurrentLikes(c.getCurrentLikes() + 1);
             case "COMMENT" -> c.setCurrentComments(c.getCurrentComments() + 1);
@@ -194,8 +198,8 @@ public class ViewerTaskFlowService {
         // 6) Update creator_stats
         CreatorStats stats = creatorStatsRepository.findByCreatorId(c.getCreatorId()).orElseGet(() -> new CreatorStats(c.getCreatorId()));
         String contentType = c.getContentType() != null ? c.getContentType() : "VIDEO";
-        switch (t.getTaskType()) {
-            case "SUBSCRIBE" -> {
+        switch (normalizedType) {
+            case "FOLLOW" -> {
                 stats.setTotalFollowers(stats.getTotalFollowers() + 1);
                 stats.setSubscribers(stats.getSubscribers() + 1);
             }
@@ -439,12 +443,11 @@ public class ViewerTaskFlowService {
             .orElseThrow(() -> new RuntimeException("Campaign not found"));
         
         String contentType = campaign.getContentType() != null ? campaign.getContentType() : "VIDEO";
-        switch (task.getTaskType().toUpperCase()) {
-            case "SUBSCRIBE" -> campaign.setCurrentSubscribers(campaign.getCurrentSubscribers() + 1);
-            case "VIEW", "VIDEO_VIEW" -> campaign.setCurrentViews(campaign.getCurrentViews() + 1);
-            case "SHORT_VIEW" -> campaign.setCurrentViews(campaign.getCurrentViews() + 1);
-            case "LIKE", "VIDEO_LIKE" -> campaign.setCurrentLikes(campaign.getCurrentLikes() + 1);
-            case "SHORT_LIKE" -> campaign.setCurrentLikes(campaign.getCurrentLikes() + 1);
+        String normalizedType = normalizeTaskType(task.getTaskType());
+        switch (normalizedType) {
+            case "FOLLOW" -> campaign.setCurrentSubscribers(campaign.getCurrentSubscribers() + 1);
+            case "VIEW" -> campaign.setCurrentViews(campaign.getCurrentViews() + 1);
+            case "LIKE" -> campaign.setCurrentLikes(campaign.getCurrentLikes() + 1);
             case "COMMENT" -> campaign.setCurrentComments(campaign.getCurrentComments() + 1);
         }
         campaign.setCurrentAmount(campaign.getCurrentAmount() + reward);
@@ -454,26 +457,26 @@ public class ViewerTaskFlowService {
         CreatorStats stats = creatorStatsRepository.findByCreatorId(campaign.getCreatorId())
             .orElseGet(() -> new CreatorStats(campaign.getCreatorId()));
         
-        switch (task.getTaskType().toUpperCase()) {
-            case "SUBSCRIBE" -> {
+        switch (normalizedType) {
+            case "FOLLOW" -> {
                 stats.setTotalFollowers(stats.getTotalFollowers() + 1);
                 stats.setSubscribers(stats.getSubscribers() + 1);
             }
-            case "VIEW", "VIDEO_VIEW" -> {
+            case "VIEW" -> {
                 stats.setTotalViews(stats.getTotalViews() + 1);
-                stats.setVideoViews(stats.getVideoViews() + 1);
+                if ("SHORT".equalsIgnoreCase(contentType)) {
+                    stats.setShortViews(stats.getShortViews() + 1);
+                } else {
+                    stats.setVideoViews(stats.getVideoViews() + 1);
+                }
             }
-            case "SHORT_VIEW" -> {
-                stats.setTotalViews(stats.getTotalViews() + 1);
-                stats.setShortViews(stats.getShortViews() + 1);
-            }
-            case "LIKE", "VIDEO_LIKE" -> {
+            case "LIKE" -> {
                 stats.setTotalLikes(stats.getTotalLikes() + 1);
-                stats.setVideoLikes(stats.getVideoLikes() + 1);
-            }
-            case "SHORT_LIKE" -> {
-                stats.setTotalLikes(stats.getTotalLikes() + 1);
-                stats.setShortLikes(stats.getShortLikes() + 1);
+                if ("SHORT".equalsIgnoreCase(contentType)) {
+                    stats.setShortLikes(stats.getShortLikes() + 1);
+                } else {
+                    stats.setVideoLikes(stats.getVideoLikes() + 1);
+                }
             }
             case "COMMENT" -> {
                 stats.setTotalComments(stats.getTotalComments() + 1);
@@ -517,5 +520,31 @@ public class ViewerTaskFlowService {
             .filter(t -> t.getPaidAt() != null && t.getPaidAt().isBefore(cleanupThreshold))
             .filter(t -> t.getProofUrl() != null || t.getProofPublicId() != null)
             .toList();
+    }
+
+    /**
+     * Normalize task type strings to handle both legacy and new enum-based types
+     * Maps: SUBSCRIBE/FOLLOW -> FOLLOW
+     *       VIEW/VIEW_LONG/VIEW_SHORT -> VIEW
+     *       LIKE -> LIKE
+     *       COMMENT -> COMMENT
+     */
+    private String normalizeTaskType(String taskType) {
+        if (taskType == null) return "VIEW";
+        
+        String upper = taskType.toUpperCase();
+        
+        // Map legacy and new types to normalized form
+        if (upper.contains("SUBSCRIBE") || upper.equals("FOLLOW")) {
+            return "FOLLOW";
+        } else if (upper.contains("VIEW")) {
+            return "VIEW";
+        } else if (upper.equals("LIKE")) {
+            return "LIKE";
+        } else if (upper.equals("COMMENT")) {
+            return "COMMENT";
+        }
+        
+        return "VIEW"; // Default fallback
     }
 }

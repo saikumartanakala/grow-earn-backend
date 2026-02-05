@@ -1,5 +1,6 @@
 S:\grow_earn\grow-earn-backend-java\src\main\java\com\growearn\repository\CreatorStatsRepository.java
 S:\grow_earn\grow-earn-backend-java\src\main\java\com\growearn\dto\TaskRejectRequestDTO.java
+S:\grow_earn\grow-earn-backend-java\src\main\java\com\growearn\entity\Platform.java
 S:\grow_earn\grow-earn-backend-java\src\main\java\com\growearn\entity\UserViolation.java
 S:\grow_earn\grow-earn-backend-java\src\main\java\com\growearn\controller\AdminViolationController.java
 S:\grow_earn\grow-earn-backend-java\src\main\java\com\growearn\dto\TaskSubmitRequestDTO.java
@@ -41,6 +42,7 @@ S:\grow_earn\grow-earn-backend-java\src\main\java\com\growearn\repository\dto\Vi
 S:\grow_earn\grow-earn-backend-java\src\main\java\com\growearn\repository\UserViolationRepository.java
 S:\grow_earn\grow-earn-backend-java\src\main\java\com\growearn\service\ViewerTaskFlowService.java
 S:\grow_earn\grow-earn-backend-java\src\main\java\com\growearn\entity\CreatorStats.java
+S:\grow_earn\grow-earn-backend-java\src\main\java\com\growearn\service\PlatformTaskMapper.java
 S:\grow_earn\grow-earn-backend-java\src\main\java\com\growearn\scheduler\ProofCleanupJob.java
 S:\grow_earn\grow-earn-backend-java\src\main\java\com\growearn\controller\ViewerProfileController.java
 S:\grow_earn\grow-earn-backend-java\src\main\java\com\growearn\entity\Earning.java
@@ -48,6 +50,7 @@ S:\grow_earn\grow-earn-backend-java\src\main\java\com\growearn\repository\UserRe
 S:\grow_earn\grow-earn-backend-java\src\main\java\com\growearn\repository\ViewerTaskEntityRepository.java
 S:\grow_earn\grow-earn-backend-java\src\main\java\com\growearn\entity\AccountStatus.java
 S:\grow_earn\grow-earn-backend-java\src\main\java\com\growearn\service\TaskService.java
+S:\grow_earn\grow-earn-backend-java\src\main\java\com\growearn\entity\TaskType.java
 S:\grow_earn\grow-earn-backend-java\src\main\java\com\growearn\dto\TaskVerificationRequest.java
 S:\grow_earn\grow-earn-backend-java\src\main\java\com\growearn\exception\GlobalExceptionHandler.java
 S:\grow_earn\grow-earn-backend-java\src\main\java\com\growearn\service\ViewerTaskService.java

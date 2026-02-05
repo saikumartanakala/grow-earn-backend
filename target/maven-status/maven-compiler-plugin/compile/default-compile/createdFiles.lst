@@ -1,10 +1,8 @@
 com\growearn\config\GlobalCorsConfig.class
 com\growearn\controller\TaskController.class
 com\growearn\repository\dto\ViewerTaskWithCampaignLinkDto.class
-com\growearn\controller\ViewerTaskController.class
 com\growearn\service\UserViolationService.class
 com\growearn\entity\CreatorStats.class
-com\growearn\service\RiskAnalysisService.class
 com\growearn\controller\AdminUserController.class
 com\growearn\dto\TaskSubmissionRequest.class
 com\growearn\repository\CampaignRepository.class
@@ -18,12 +16,11 @@ com\growearn\controller\AdminViolationController.class
 com\growearn\repository\CreatorStatsRepository.class
 com\growearn\repository\UserRepository.class
 com\growearn\repository\TaskRepository.class
-com\growearn\controller\TestController.class
 com\growearn\controller\ViewerProfileController$1.class
 com\growearn\config\AdminSeeder.class
 com\growearn\GrowEarnBackendJavaApplication.class
-com\growearn\scheduler\ProofCleanupJob.class
 com\growearn\service\CloudinaryService.class
+com\growearn\service\PlatformTaskMapper$1.class
 com\growearn\controller\AdminTaskController.class
 com\growearn\dto\TaskSubmitRequestDTO.class
 com\growearn\repository\RevokedTokenRepository.class
@@ -36,8 +33,6 @@ com\growearn\controller\ProfileController.class
 com\growearn\controller\CreatorStatsController.class
 com\growearn\service\CreatorStatsService.class
 com\growearn\entity\Role.class
-com\growearn\scheduler\PaymentReleaseJob.class
-com\growearn\controller\CreatorController.class
 com\growearn\service\ViewerTaskService.class
 com\growearn\dto\AuthResponseDTO.class
 com\growearn\security\JwtUtil.class
@@ -48,7 +43,6 @@ com\growearn\dto\AdminTaskDTO.class
 com\growearn\config\AdminAccountsConfig.class
 com\growearn\dto\AdminTaskDTO$ViewerInfoDTO.class
 com\growearn\entity\RevokedToken.class
-com\growearn\repository\ViewerTaskRepository.class
 com\growearn\security\SecurityConfig.class
 com\growearn\entity\LoginAudit.class
 com\growearn\controller\AuthController.class
@@ -64,7 +58,6 @@ com\growearn\security\JwtAuthFilter.class
 com\growearn\entity\WalletEntity.class
 com\growearn\service\CampaignService.class
 com\growearn\service\UserService.class
-com\growearn\controller\CampaignController.class
 com\growearn\dto\TaskMarkPaidRequestDTO.class
 com\growearn\controller\ViewerProfileController.class
 com\growearn\service\TaskService.class

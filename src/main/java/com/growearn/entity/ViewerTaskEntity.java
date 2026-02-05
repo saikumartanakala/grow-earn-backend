@@ -17,6 +17,17 @@ public class ViewerTaskEntity {
     @Column(name = "viewer_id")
     private Long viewerId;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "platform", nullable = false)
+    private Platform platform = Platform.YOUTUBE;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "task_type", nullable = false)
+    private TaskType taskType;
+
+    @Column(name = "target_url", length = 500)
+    private String targetUrl;
+
     @Column(name = "status")
     private String status; // ASSIGNED, UNDER_VERIFICATION, COMPLETED, REJECTED
 
@@ -135,4 +146,11 @@ public class ViewerTaskEntity {
     public void setHoldEndTime(LocalDateTime holdEndTime) { this.holdEndTime = holdEndTime; }
     public LocalDateTime getVerifiedAt() { return verifiedAt; }
     public void setVerifiedAt(LocalDateTime verifiedAt) { this.verifiedAt = verifiedAt; }
+
+    public Platform getPlatform() { return platform; }
+    public void setPlatform(Platform platform) { this.platform = platform; }
+    public TaskType getTaskType() { return taskType; }
+    public void setTaskType(TaskType taskType) { this.taskType = taskType; }
+    public String getTargetUrl() { return targetUrl; }
+    public void setTargetUrl(String targetUrl) { this.targetUrl = targetUrl; }
 }

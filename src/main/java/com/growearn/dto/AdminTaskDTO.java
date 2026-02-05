@@ -14,6 +14,7 @@ public class AdminTaskDTO {
     private String status;
     private LocalDateTime submittedAt;
     private String taskType;
+    private String platform; // YOUTUBE, INSTAGRAM, FACEBOOK, TWITTER
     private String targetLink;
     private Double earning;
 
@@ -103,6 +104,14 @@ public class AdminTaskDTO {
 
     public void setTaskType(String taskType) {
         this.taskType = taskType;
+    }
+
+    public String getPlatform() {
+        return platform;
+    }
+
+    public void setPlatform(String platform) {
+        this.platform = platform;
     }
 
     public String getTargetLink() {

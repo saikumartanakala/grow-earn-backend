@@ -2,6 +2,8 @@ package com.growearn.service;
 
 import com.growearn.entity.ViewerTaskEntity;
 import com.growearn.entity.User;
+import com.growearn.entity.Platform;
+import com.growearn.entity.TaskType;
 import com.growearn.repository.ViewerTaskEntityRepository;
 import com.growearn.repository.UserRepository;
 import org.slf4j.Logger;
@@ -33,44 +35,56 @@ public class RiskAnalysisService {
 
     private final ViewerTaskEntityRepository viewerTaskRepository;
     private final UserRepository userRepository;
+    private final PlatformTaskMapper platformTaskMapper;
 
     public RiskAnalysisService(ViewerTaskEntityRepository viewerTaskRepository,
-                               UserRepository userRepository) {
+                               UserRepository userRepository,
+                               PlatformTaskMapper platformTaskMapper) {
         this.viewerTaskRepository = viewerTaskRepository;
         this.userRepository = userRepository;
+        this.platformTaskMapper = platformTaskMapper;
     }
 
     /**
-     * Analyze risk for a task submission
+     * Analyze risk for a task submission with platform and task type awareness
      */
     public Map<String, Object> analyzeRisk(ViewerTaskEntity task, String proofUrl, String proofText, 
                                            String deviceFingerprint, String ipAddress) {
         double riskScore = 0.0;
         StringBuilder reasons = new StringBuilder();
 
+        // Get platform and task type for risk adjustments
+        Platform platform = task.getPlatform() != null ? task.getPlatform() : Platform.YOUTUBE;
+        TaskType taskType = task.getTaskType() != null ? task.getTaskType() : TaskType.VIEW_LONG;
+
+        // Apply platform-specific risk multiplier
+        double taskTypeMultiplier = platformTaskMapper.getRiskMultiplier(taskType);
+
         // 1. Check duplicate proof hash
         String proofHash = generateHash(proofUrl);
         task.setProofHash(proofHash);
-        double duplicateProofScore = checkDuplicateProof(proofHash, task.getViewerId());
-        riskScore += duplicateProofScore;
+        double duplicateProofScore = checkDuplicateProof(proofHash, task.getViewerId(), platform);
+        riskScore += duplicateProofScore * taskTypeMultiplier;
         if (duplicateProofScore > 0) {
             reasons.append("Duplicate proof detected. ");
         }
 
-        // 2. Check repeated comment text
+        // 2. Check repeated comment text (higher risk for COMMENT tasks)
         if (proofText != null && !proofText.trim().isEmpty()) {
-            double repeatedTextScore = checkRepeatedText(proofText, task.getViewerId());
-            riskScore += repeatedTextScore;
+            double repeatedTextScore = checkRepeatedText(proofText, task.getViewerId(), platform);
+            // Extra penalty for repetitive comments
+            double textMultiplier = taskType == TaskType.COMMENT ? 1.5 : 1.0;
+            riskScore += repeatedTextScore * textMultiplier;
             if (repeatedTextScore > 0) {
                 reasons.append("Repeated proof text detected. ");
             }
         }
 
-        // 3. Check task frequency per device
-        double frequencyScore = checkTaskFrequency(task.getViewerId(), deviceFingerprint);
+        // 3. Check task frequency per device and platform
+        double frequencyScore = checkTaskFrequency(task.getViewerId(), deviceFingerprint, platform, taskType);
         riskScore += frequencyScore;
         if (frequencyScore > 0) {
-            reasons.append("High task submission frequency. ");
+            reasons.append("High task submission frequency for " + platform.name() + ". ");
         }
 
         // 4. Check account age
@@ -87,8 +101,13 @@ public class RiskAnalysisService {
             reasons.append("Device/IP shared with other accounts. ");
         }
 
+        // Additional check: FOLLOW tasks always flagged for manual review
+        if (taskType == TaskType.FOLLOW) {
+            reasons.append("Follow task requires hold period verification. ");
+        }
+
         // Determine auto-flag
-        boolean autoFlag = riskScore >= MEDIUM_RISK_THRESHOLD;
+        boolean autoFlag = riskScore >= MEDIUM_RISK_THRESHOLD || taskType == TaskType.FOLLOW;
         boolean autoReject = riskScore >= HIGH_RISK_THRESHOLD;
 
         String riskLevel;
@@ -100,8 +119,8 @@ public class RiskAnalysisService {
             riskLevel = "LOW";
         }
 
-        logger.info("Risk analysis for viewer {}: score={}, level={}, autoReject={}", 
-                    task.getViewerId(), riskScore, riskLevel, autoReject);
+        logger.info("Risk analysis for viewer {} on {} {}: score={}, level={}, autoReject={}", 
+                    task.getViewerId(), platform.name(), taskType.name(), riskScore, riskLevel, autoReject);
 
         return Map.of(
             "riskScore", riskScore,
@@ -114,11 +133,12 @@ public class RiskAnalysisService {
     }
 
     /**
-     * Check for duplicate proof submissions
+     * Check for duplicate proof submissions (platform-aware)
      */
-    private double checkDuplicateProof(String proofHash, Long viewerId) {
+    private double checkDuplicateProof(String proofHash, Long viewerId, Platform platform) {
         List<ViewerTaskEntity> existingTasks = viewerTaskRepository.findAll().stream()
             .filter(t -> proofHash.equals(t.getProofHash()))
+            .filter(t -> platform.equals(t.getPlatform())) // Same platform
             .filter(t -> !viewerId.equals(t.getViewerId())) // Different user with same proof
             .toList();
 
@@ -126,9 +146,10 @@ public class RiskAnalysisService {
             return WEIGHT_DUPLICATE_PROOF;
         }
 
-        // Check if same user submitted same proof multiple times
+        // Check if same user submitted same proof multiple times on same platform
         long sameUserCount = viewerTaskRepository.findAll().stream()
             .filter(t -> proofHash.equals(t.getProofHash()))
+            .filter(t -> platform.equals(t.getPlatform()))
             .filter(t -> viewerId.equals(t.getViewerId()))
             .count();
 
@@ -140,13 +161,14 @@ public class RiskAnalysisService {
     }
 
     /**
-     * Check for repeated proof text
+     * Check for repeated proof text (platform-aware)
      */
-    private double checkRepeatedText(String proofText, Long viewerId) {
+    private double checkRepeatedText(String proofText, Long viewerId, Platform platform) {
         String textHash = generateHash(proofText);
         
         long matchCount = viewerTaskRepository.findAll().stream()
             .filter(t -> viewerId.equals(t.getViewerId()))
+            .filter(t -> platform.equals(t.getPlatform()))
             .filter(t -> t.getProofText() != null)
             .filter(t -> textHash.equals(generateHash(t.getProofText())))
             .count();
@@ -161,13 +183,18 @@ public class RiskAnalysisService {
     }
 
     /**
-     * Check task submission frequency
+     * Check task submission frequency (platform and task type aware)
      */
-    private double checkTaskFrequency(Long viewerId, String deviceFingerprint) {
+    private double checkTaskFrequency(Long viewerId, String deviceFingerprint, Platform platform, TaskType taskType) {
         LocalDateTime oneDayAgo = LocalDateTime.now().minus(1, ChronoUnit.DAYS);
+        
+        // Check platform-specific rate limits
+        int rateLimit = platformTaskMapper.getPlatformRateLimit(platform, taskType);
         
         long tasksLast24Hours = viewerTaskRepository.findAll().stream()
             .filter(t -> viewerId.equals(t.getViewerId()))
+            .filter(t -> platform.equals(t.getPlatform()))
+            .filter(t -> taskType.equals(t.getTaskType()))
             .filter(t -> t.getSubmittedAt() != null && t.getSubmittedAt().isAfter(oneDayAgo))
             .count();
 
@@ -175,18 +202,20 @@ public class RiskAnalysisService {
         if (deviceFingerprint != null) {
             long deviceTasksLast24Hours = viewerTaskRepository.findAll().stream()
                 .filter(t -> deviceFingerprint.equals(t.getDeviceFingerprint()))
+                .filter(t -> platform.equals(t.getPlatform()))
                 .filter(t -> t.getSubmittedAt() != null && t.getSubmittedAt().isAfter(oneDayAgo))
                 .count();
 
             tasksLast24Hours = Math.max(tasksLast24Hours, deviceTasksLast24Hours);
         }
 
-        if (tasksLast24Hours > 50) {
-            return WEIGHT_TASK_FREQUENCY;
-        } else if (tasksLast24Hours > 30) {
-            return WEIGHT_TASK_FREQUENCY * 0.7;
-        } else if (tasksLast24Hours > 20) {
-            return WEIGHT_TASK_FREQUENCY * 0.4;
+        // Use platform-specific rate limits
+        if (tasksLast24Hours > rateLimit * 2) {
+            return WEIGHT_TASK_FREQUENCY; // Exceeded by 200%
+        } else if (tasksLast24Hours > rateLimit * 1.5) {
+            return WEIGHT_TASK_FREQUENCY * 0.7; // Exceeded by 150%
+        } else if (tasksLast24Hours > rateLimit) {
+            return WEIGHT_TASK_FREQUENCY * 0.4; // Exceeded limit
         }
 
         return 0.0;

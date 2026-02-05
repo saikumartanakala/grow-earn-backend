@@ -150,7 +150,7 @@ public class CampaignController {
         if (campaign.getLikesGoal() < 0) missingFields.add("likesGoal");
         if (campaign.getCommentsGoal() < 0) missingFields.add("commentsGoal");
         if (campaign.getTotalAmount() <= 0.0) missingFields.add("totalAmount");
-        if (isNullOrEmpty(campaign.getPlatform())) missingFields.add("platform");
+        if (campaign.getPlatform() == null) missingFields.add("platform");
         if (isNullOrEmpty(campaign.getChannelName())) missingFields.add("channelName");
         if (isNullOrEmpty(campaign.getChannelLink())) missingFields.add("channelLink");
         if (isNullOrEmpty(campaign.getContentType())) missingFields.add("contentType");

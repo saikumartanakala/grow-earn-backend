@@ -2,6 +2,7 @@ package com.growearn.service;
 
 import com.growearn.entity.Campaign;
 import com.growearn.entity.TaskEntity;
+import com.growearn.entity.TaskType;
 import com.growearn.repository.TaskRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -10,9 +11,11 @@ import org.springframework.transaction.annotation.Transactional;
 public class TaskService {
 
     private final TaskRepository taskRepository;
+    private final PlatformTaskMapper platformTaskMapper;
 
-    public TaskService(TaskRepository taskRepository) {
+    public TaskService(TaskRepository taskRepository, PlatformTaskMapper platformTaskMapper) {
         this.taskRepository = taskRepository;
+        this.platformTaskMapper = platformTaskMapper;
     }
 
     @Transactional
@@ -21,13 +24,13 @@ public class TaskService {
         // Each viewer gets one task, so create as many tasks as the goal requires
         double rewardPerTask = calculateReward(c);
         
-        // Create subscriber tasks (one per subscriber goal)
+        // Create FOLLOW tasks (subscriber/follower goal)
         int subCount = Math.max(1, c.getSubscriberGoal());
         if (c.getSubscriberGoal() > 0) {
             for (int i = 0; i < subCount; i++) {
                 TaskEntity t = new TaskEntity();
                 t.setCampaignId(c.getId());
-                t.setTaskType("SUBSCRIBE");
+                t.setTaskType(TaskType.FOLLOW.name()); // Use enum name
                 t.setTargetLink(c.getChannelLink());
                 t.setEarning(rewardPerTask);
                 t.setStatus("OPEN");
@@ -35,13 +38,17 @@ public class TaskService {
             }
         }
         
-        // Create view tasks
+        // Create VIEW tasks (map to VIEW_LONG or VIEW_SHORT based on contentType)
         int viewCount = Math.max(1, c.getViewsGoal());
         if (c.getViewsGoal() > 0) {
+            TaskType viewType = "SHORT".equalsIgnoreCase(c.getContentType()) 
+                ? TaskType.VIEW_SHORT 
+                : TaskType.VIEW_LONG;
+            
             for (int i = 0; i < viewCount; i++) {
                 TaskEntity t = new TaskEntity();
                 t.setCampaignId(c.getId());
-                t.setTaskType("VIEW");
+                t.setTaskType(viewType.name());
                 t.setTargetLink(c.getVideoLink());
                 t.setEarning(rewardPerTask);
                 t.setStatus("OPEN");
@@ -49,13 +56,13 @@ public class TaskService {
             }
         }
         
-        // Create like tasks
+        // Create LIKE tasks
         int likeCount = Math.max(1, c.getLikesGoal());
         if (c.getLikesGoal() > 0) {
             for (int i = 0; i < likeCount; i++) {
                 TaskEntity t = new TaskEntity();
                 t.setCampaignId(c.getId());
-                t.setTaskType("LIKE");
+                t.setTaskType(TaskType.LIKE.name());
                 t.setTargetLink(c.getVideoLink());
                 t.setEarning(rewardPerTask);
                 t.setStatus("OPEN");
@@ -63,13 +70,13 @@ public class TaskService {
             }
         }
         
-        // Create comment tasks
+        // Create COMMENT tasks
         int commentCount = Math.max(1, c.getCommentsGoal());
         if (c.getCommentsGoal() > 0) {
             for (int i = 0; i < commentCount; i++) {
                 TaskEntity t = new TaskEntity();
                 t.setCampaignId(c.getId());
-                t.setTaskType("COMMENT");
+                t.setTaskType(TaskType.COMMENT.name());
                 t.setTargetLink(c.getVideoLink());
                 t.setEarning(rewardPerTask);
                 t.setStatus("OPEN");

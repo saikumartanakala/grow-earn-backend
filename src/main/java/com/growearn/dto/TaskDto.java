@@ -6,7 +6,9 @@ public class TaskDto {
     private Long taskId; // campaignId
     private Long campaignId;
     private String taskType;
+    private String platform; // YOUTUBE, INSTAGRAM, FACEBOOK, TWITTER
     private String channelName;
+    private String targetUrl;
     private double earnAmount;
     private LocalDateTime postedAt;
 
@@ -20,6 +22,11 @@ public class TaskDto {
         this.earnAmount = earnAmount;
         this.postedAt = postedAt;
     }
+
+    public String getPlatform() { return platform; }
+    public void setPlatform(String platform) { this.platform = platform; }
+    public String getTargetUrl() { return targetUrl; }
+    public void setTargetUrl(String targetUrl) { this.targetUrl = targetUrl; }
 
     public Long getTaskId() { return taskId; }
     public void setTaskId(Long taskId) { this.taskId = taskId; }

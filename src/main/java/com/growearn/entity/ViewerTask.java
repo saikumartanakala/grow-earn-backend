@@ -28,16 +28,17 @@ public class ViewerTask {
     // New field to track which viewer has taken the task
     @Column(name = "assigned_to")
     private Long assignedTo;
-    public Long getAssignedTo() {
-        return assignedTo;
-    }
+    
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private Platform platform = Platform.YOUTUBE;
 
-    public void setAssignedTo(Long assignedTo) {
-        this.assignedTo = assignedTo;
-    }
+    @Enumerated(EnumType.STRING)
+    @Column(name = "task_type", nullable = false)
+    private TaskType taskType;
 
-    @Column(name = "task_type")
-    private String taskType;
+    @Column(name = "target_url", length = 500)
+    private String targetUrl;
 
     @Column(name = "completed")
     private boolean completed;
@@ -58,6 +59,38 @@ public class ViewerTask {
 
     public Long getId() {
         return id;
+    }
+    
+    public Platform getPlatform() {
+        return platform;
+    }
+
+    public void setPlatform(Platform platform) {
+        this.platform = platform;
+    }
+
+    public TaskType getTaskType() {
+        return taskType;
+    }
+
+    public void setTaskType(TaskType taskType) {
+        this.taskType = taskType;
+    }
+
+    public String getTargetUrl() {
+        return targetUrl;
+    }
+
+    public void setTargetUrl(String targetUrl) {
+        this.targetUrl = targetUrl;
+    }
+    
+    public Long getAssignedTo() {
+        return assignedTo;
+    }
+
+    public void setAssignedTo(Long assignedTo) {
+        this.assignedTo = assignedTo;
     }
 
     public Long getCampaignId() {
@@ -82,14 +115,6 @@ public class ViewerTask {
 
     public void setCreatorId(Long creatorId) {
         this.creatorId = creatorId;
-    }
-
-    public String getTaskType() {
-        return taskType;
-    }
-
-    public void setTaskType(String taskType) {
-        this.taskType = taskType;
     }
 
     public boolean isCompleted() {
