@@ -61,7 +61,7 @@ public class ViewerDashboardController {
             return Map.of("error", "User not found");
         }
 
-        long completedTasksCount = viewerTaskEntityRepository.countByViewerIdAndStatus(userId, "COMPLETED");
+        long completedTasksCount = viewerTaskEntityRepository.countByViewerIdAndStatus(userId, "PAID");
 
         Double totalEarnings = earningRepository.sumEarningsByViewerId(userId);
         if (totalEarnings == null) totalEarnings = 0.0;

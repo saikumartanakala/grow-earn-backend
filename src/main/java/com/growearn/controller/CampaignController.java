@@ -241,7 +241,7 @@ public class CampaignController {
             System.out.println("[CampaignController] Missing or invalid creatorId in JWT principal. (GET)");
             return ResponseEntity.status(403).body("Missing or invalid creatorId in JWT principal.");
         }
-        String normalizedStatus = status.equalsIgnoreCase("in-progress") ? "IN_PROGRESS" : status.equalsIgnoreCase("completed") ? "COMPLETED" : status.toUpperCase();
+        String normalizedStatus = status.equalsIgnoreCase("in-progress") ? "ACTIVE" : status.equalsIgnoreCase("completed") ? "COMPLETED" : status.toUpperCase();
         List<Campaign> campaigns = campaignService.getCampaignsByCreatorAndStatus(creatorId, normalizedStatus);
         // Map to always include required fields with defaults
         List<Campaign> safeCampaigns = (campaigns != null) ? campaigns : new java.util.ArrayList<>();
@@ -402,7 +402,7 @@ public class CampaignController {
             
             // Count viewer tasks by status
             List<ViewerTaskEntity> pendingViewerTasks = viewerTaskEntityRepository.findByTaskIdInAndStatus(taskIds, "UNDER_VERIFICATION");
-            List<ViewerTaskEntity> completedViewerTasks = viewerTaskEntityRepository.findByTaskIdInAndStatus(taskIds, "COMPLETED");
+            List<ViewerTaskEntity> completedViewerTasks = viewerTaskEntityRepository.findByTaskIdInAndStatus(taskIds, "PAID");
             
             underVerification = pendingViewerTasks.size();
             completedTasks = completedViewerTasks.size();

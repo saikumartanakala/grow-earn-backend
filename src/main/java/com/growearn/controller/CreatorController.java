@@ -61,7 +61,7 @@ public class CreatorController {
         String auth = req.getHeader("Authorization");
         if (auth == null || !auth.startsWith("Bearer ")) throw new RuntimeException("Missing token");
         Long creatorId = jwtUtil.extractUserId(auth.substring(7));
-        return campaignRepository.findByCreatorIdAndStatus(creatorId, "IN_PROGRESS");
+        return campaignRepository.findByCreatorIdAndStatus(creatorId, "ACTIVE");
     }
 
     @GetMapping("/goals/completed")
@@ -136,8 +136,8 @@ public class CreatorController {
         if (taskIds.isEmpty()) return List.of();
         
         // Get viewer tasks that are completed for these tasks
-        List<ViewerTaskEntity> completedTasks = viewerTaskEntityRepository.findByTaskIdInAndStatus(taskIds, "COMPLETED");
-        
+        List<ViewerTaskEntity> completedTasks = viewerTaskEntityRepository.findByTaskIdInAndStatus(taskIds, "PAID");
+
         return enrichCreatorViewerTasks(completedTasks, tasks, campaigns);
     }
 

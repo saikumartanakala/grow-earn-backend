@@ -192,6 +192,7 @@ public class ViewerProfileController {
         map.put("channelName", user.getChannelName());
         map.put("profilePicUrl", user.getProfilePicUrl());
         map.put("upiId", user.getUpiId());
+        map.put("isVerified", user.getIsVerified());
         map.put("createdAt", user.getCreatedAt() != null ? user.getCreatedAt().toString() : null);
         
         // Account Status Information

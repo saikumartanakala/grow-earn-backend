@@ -330,7 +330,7 @@ public class ViewerTaskController {
         Long viewerId = jwtUtil.extractUserId(auth.substring(7));
         // Use optimized query - returns only completed tasks for this viewer, ordered by completion date
         java.util.List<ViewerTaskEntity> tasks = viewerTaskEntityRepository
-            .findByViewerIdAndStatusOrderByCompletedAtDesc(viewerId, "COMPLETED");
+            .findByViewerIdAndStatusOrderByCompletedAtDesc(viewerId, "PAID");
         return enrichViewerTasks(tasks);
     }
 
@@ -383,7 +383,7 @@ public class ViewerTaskController {
         String auth = req.getHeader("Authorization");
         if (auth == null || !auth.startsWith("Bearer ")) throw new RuntimeException("Missing token");
         Long viewerId = jwtUtil.extractUserId(auth.substring(7));
-        long completed = viewerTaskEntityRepository.countByViewerIdAndStatus(viewerId, "COMPLETED");
+        long completed = viewerTaskEntityRepository.countByViewerIdAndStatus(viewerId, "PAID");
         long underVerification = viewerTaskEntityRepository.countByViewerIdAndStatus(viewerId, "UNDER_VERIFICATION");
         Double totalEarnings = earningRepository.sumEarningsByViewerId(viewerId);
         // Count available tasks (excluding already grabbed by this viewer)

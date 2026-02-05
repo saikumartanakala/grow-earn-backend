@@ -187,6 +187,7 @@ public class CreatorProfileController {
         map.put("whatsappNumber", user.getPhoneNumber()); // Also return as whatsappNumber for frontend
         map.put("channelName", user.getChannelName());
         map.put("profilePicUrl", user.getProfilePicUrl());
+        map.put("isVerified", user.getIsVerified());
         map.put("createdAt", user.getCreatedAt() != null ? user.getCreatedAt().toString() : null);
         
         // Account Status Information

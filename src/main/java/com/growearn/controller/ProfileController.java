@@ -253,6 +253,7 @@ public class ProfileController {
         map.put("channelName", user.getChannelName());
         map.put("profilePicUrl", user.getProfilePicUrl());
         map.put("upiId", user.getUpiId());
+        map.put("isVerified", user.getIsVerified());
         map.put("createdAt", user.getCreatedAt() != null ? user.getCreatedAt().toString() : null);
         map.put("isProfileComplete", isProfileComplete(user));
         return map;
