@@ -8,9 +8,8 @@ import com.growearn.security.JwtUtil;
 import com.growearn.repository.TaskRepository;
 import com.growearn.repository.ViewerTaskEntityRepository;
 import com.growearn.repository.EarningRepository;
-import com.growearn.repository.WalletRepository;
+import com.growearn.service.ViewerWalletService;
 import com.growearn.entity.TaskEntity;
-import com.growearn.entity.WalletEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
@@ -31,19 +30,19 @@ public class ViewerTaskController {
     private final TaskRepository taskRepository;
     private final ViewerTaskEntityRepository viewerTaskEntityRepository;
     private final EarningRepository earningRepository;
-    private final WalletRepository walletRepository;
+    private final ViewerWalletService viewerWalletService;
     private final com.growearn.repository.CampaignRepository campaignRepository;
 
     public ViewerTaskController(ViewerTaskFlowService viewerTaskFlowService, JwtUtil jwtUtil,
                                 TaskRepository taskRepository, ViewerTaskEntityRepository viewerTaskEntityRepository,
-                                EarningRepository earningRepository, WalletRepository walletRepository,
+                                EarningRepository earningRepository, ViewerWalletService viewerWalletService,
                                 com.growearn.repository.CampaignRepository campaignRepository) {
         this.viewerTaskFlowService = viewerTaskFlowService;
         this.jwtUtil = jwtUtil;
         this.taskRepository = taskRepository;
         this.viewerTaskEntityRepository = viewerTaskEntityRepository;
         this.earningRepository = earningRepository;
-        this.walletRepository = walletRepository;
+        this.viewerWalletService = viewerWalletService;
         this.campaignRepository = campaignRepository;
     }
 
@@ -356,7 +355,12 @@ public class ViewerTaskController {
             if (task != null) {
                 taskData.put("taskType", task.getTaskType());
                 taskData.put("targetLink", task.getTargetLink());
-                taskData.put("earning", task.getEarning() != null ? task.getEarning() : 0.0);
+                double reward = task.getEarning() != null ? task.getEarning() : 0.0;
+                taskData.put("earning", reward);
+                taskData.put("reward", reward);
+                taskData.put("amount", reward);
+                taskData.put("earnings", reward);
+                taskData.put("prize", reward);
                 taskData.put("campaignId", task.getCampaignId());
                 
                 // Get campaign details for platform info
@@ -371,6 +375,10 @@ public class ViewerTaskController {
             } else {
                 taskData.put("taskType", "Task");
                 taskData.put("earning", 0.0);
+                taskData.put("reward", 0.0);
+                taskData.put("amount", 0.0);
+                taskData.put("earnings", 0.0);
+                taskData.put("prize", 0.0);
             }
             
             result.add(taskData);
@@ -401,10 +409,12 @@ public class ViewerTaskController {
         String auth = req.getHeader("Authorization");
         if (auth == null || !auth.startsWith("Bearer ")) throw new RuntimeException("Missing token");
         Long viewerId = jwtUtil.extractUserId(auth.substring(7));
-        WalletEntity w = walletRepository.findByViewerId(viewerId).orElseGet(() -> {
-            WalletEntity ne = new WalletEntity(); ne.setViewerId(viewerId); ne.setBalance(0.0); return ne;
-        });
-        return Map.of("balance", w.getBalance());
+        com.growearn.entity.ViewerWallet wallet = viewerWalletService.getOrCreateWallet(viewerId);
+        return Map.of(
+            "balance", wallet.getBalance().add(wallet.getLockedBalance()),
+            "available", wallet.getBalance(),
+            "locked", wallet.getLockedBalance()
+        );
     }
 
     @GetMapping("/earnings")

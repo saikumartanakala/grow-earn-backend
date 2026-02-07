@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -20,31 +21,31 @@ public class ViewerTaskFlowService {
     private final TaskRepository taskRepository;
     private final ViewerTaskEntityRepository viewerTaskEntityRepository;
     private final EarningRepository earningRepository;
-    private final WalletRepository walletRepository;
     private final CampaignRepository campaignRepository;
     private final CreatorStatsRepository creatorStatsRepository;
     private final RiskAnalysisService riskAnalysisService;
     private final UserViolationService userViolationService;
     private final PlatformTaskMapper platformTaskMapper;
+    private final ViewerWalletService viewerWalletService;
 
     public ViewerTaskFlowService(TaskRepository taskRepository,
                                  ViewerTaskEntityRepository viewerTaskEntityRepository,
                                  EarningRepository earningRepository,
-                                 WalletRepository walletRepository,
                                  CampaignRepository campaignRepository,
                                  CreatorStatsRepository creatorStatsRepository,
                                  RiskAnalysisService riskAnalysisService,
                                  UserViolationService userViolationService,
-                                 PlatformTaskMapper platformTaskMapper) {
+                                 PlatformTaskMapper platformTaskMapper,
+                                 ViewerWalletService viewerWalletService) {
         this.taskRepository = taskRepository;
         this.viewerTaskEntityRepository = viewerTaskEntityRepository;
         this.earningRepository = earningRepository;
-        this.walletRepository = walletRepository;
         this.campaignRepository = campaignRepository;
         this.creatorStatsRepository = creatorStatsRepository;
         this.riskAnalysisService = riskAnalysisService;
         this.userViolationService = userViolationService;
         this.platformTaskMapper = platformTaskMapper;
+        this.viewerWalletService = viewerWalletService;
     }
 
     public List<TaskEntity> getActiveTasks() {
@@ -75,6 +76,7 @@ public class ViewerTaskFlowService {
         ViewerTaskEntity v = new ViewerTaskEntity();
         v.setTaskId(taskId);
         v.setViewerId(viewerId);
+        v.setTaskType(toViewerTaskType(t));
         v.setStatus("ASSIGNED");
         v.setAssignedAt(LocalDateTime.now());
         viewerTaskEntityRepository.save(v);
@@ -90,9 +92,11 @@ public class ViewerTaskFlowService {
         viewerTaskEntityRepository.save(v);
 
         TaskEntity t = taskRepository.findById(taskId).orElseThrow(() -> new RuntimeException("Task not found"));
+        v.setTaskType(toViewerTaskType(t));
         t.setStatus("UNDER_VERIFICATION");
         taskRepository.save(t);
 
+        addLockedForTask(viewerId, t);
         return v;
     }
 
@@ -114,11 +118,14 @@ public class ViewerTaskFlowService {
             // Submit the already assigned task
             v.setStatus("UNDER_VERIFICATION");
             v.setProof("Task completed by viewer at " + LocalDateTime.now());
+            v.setTaskType(toViewerTaskType(taskRepository.findById(taskId)
+                .orElseThrow(() -> new RuntimeException("Task not found"))));
             viewerTaskEntityRepository.save(v);
             
             TaskEntity t = taskRepository.findById(taskId).orElseThrow(() -> new RuntimeException("Task not found"));
             t.setStatus("UNDER_VERIFICATION");
             taskRepository.save(t);
+            addLockedForTask(viewerId, t);
             return v;
         }
         
@@ -136,10 +143,13 @@ public class ViewerTaskFlowService {
         ViewerTaskEntity v = new ViewerTaskEntity();
         v.setTaskId(taskId);
         v.setViewerId(viewerId);
+        v.setTaskType(toViewerTaskType(t));
         v.setStatus("UNDER_VERIFICATION");
         v.setProof("Task completed by viewer at " + LocalDateTime.now());
         v.setAssignedAt(LocalDateTime.now());
         viewerTaskEntityRepository.save(v);
+
+        addLockedForTask(viewerId, t);
         
         return v;
     }
@@ -155,33 +165,13 @@ public class ViewerTaskFlowService {
 
         TaskEntity t = taskRepository.findById(v.getTaskId()).orElseThrow(() -> new RuntimeException("Task not found"));
 
-        // 1) Update viewer_tasks -> COMPLETED
-        v.setStatus("COMPLETED");
-        v.setCompletedAt(LocalDateTime.now());
+        // 1) Update viewer_tasks -> HOLD
+        LocalDateTime now = LocalDateTime.now();
+        v.setStatus("ON_HOLD");
+        v.setApprovedAt(now);
+        v.setHoldStartTime(now);
+        v.setHoldEndTime(now.plusDays(HOLD_PERIOD_DAYS));
         viewerTaskEntityRepository.save(v);
-
-        // 2) Update tasks -> COMPLETED
-        t.setStatus("COMPLETED");
-        taskRepository.save(t);
-
-        // 3) Insert into earnings
-        double reward = t.getEarning() != null ? t.getEarning() : 0.0;
-        Earning e = new Earning();
-        e.setViewerId(v.getViewerId());
-        e.setAmount(reward);
-        e.setDescription("task=" + t.getId() + ",campaign=" + t.getCampaignId());
-        e.setCreatedAt(LocalDateTime.now());
-        earningRepository.save(e);
-
-        // 4) Update wallet balance
-        WalletEntity w = walletRepository.findByViewerId(v.getViewerId()).orElseGet(() -> {
-            WalletEntity ne = new WalletEntity();
-            ne.setViewerId(v.getViewerId());
-            ne.setBalance(0.0);
-            return walletRepository.save(ne);
-        });
-        w.setBalance(w.getBalance() + reward);
-        walletRepository.save(w);
 
         // 5) Update campaigns counters (normalize task type for legacy compatibility)
         Campaign c = campaignRepository.findById(t.getCampaignId()).orElseThrow(() -> new RuntimeException("Campaign not found"));
@@ -192,7 +182,8 @@ public class ViewerTaskFlowService {
             case "LIKE" -> c.setCurrentLikes(c.getCurrentLikes() + 1);
             case "COMMENT" -> c.setCurrentComments(c.getCurrentComments() + 1);
         }
-        c.setCurrentAmount(c.getCurrentAmount() + reward);
+        double rewardValue = t.getEarning() != null ? t.getEarning() : 0.0;
+        c.setCurrentAmount(c.getCurrentAmount() + rewardValue);
         campaignRepository.save(c);
 
         // 6) Update creator_stats
@@ -221,7 +212,7 @@ public class ViewerTaskFlowService {
         }
         creatorStatsRepository.save(stats);
 
-        return java.util.Map.of("success", true, "reward", reward);
+        return java.util.Map.of("success", true, "status", "ON_HOLD", "holdEndTime", v.getHoldEndTime());
     }
 
     /**
@@ -307,7 +298,13 @@ public class ViewerTaskFlowService {
 
         // Set status to UNDER_VERIFICATION for admin review
         viewerTask.setStatus("UNDER_VERIFICATION");
+        viewerTask.setTaskType(toViewerTaskType(taskRepository.findById(taskId)
+            .orElseThrow(() -> new RuntimeException("Task not found"))));
         viewerTaskEntityRepository.save(viewerTask);
+
+        TaskEntity task = taskRepository.findById(taskId)
+            .orElseThrow(() -> new RuntimeException("Task not found"));
+        addLockedForTask(viewerId, task);
 
         logger.info("Task submitted for verification. ViewerId: {}, TaskId: {}, RiskScore: {}", 
                     viewerId, taskId, riskScore);
@@ -334,20 +331,22 @@ public class ViewerTaskFlowService {
             return Map.of("error", "Task is not under verification", "currentStatus", viewerTask.getStatus());
         }
 
-        // Move to HOLD status (7-day hold period)
-        viewerTask.setStatus("HOLD");
-        viewerTask.setApprovedAt(LocalDateTime.now());
+        // Move to HOLD (no wallet update yet)
+        LocalDateTime now = LocalDateTime.now();
+        viewerTask.setStatus("ON_HOLD");
+        viewerTask.setApprovedAt(now);
         viewerTask.setApprovedBy(adminId);
-        viewerTask.setHoldExpiry(LocalDateTime.now().plus(HOLD_PERIOD_DAYS, ChronoUnit.DAYS));
+        viewerTask.setHoldStartTime(now);
+        viewerTask.setHoldEndTime(now.plusDays(HOLD_PERIOD_DAYS));
         viewerTaskEntityRepository.save(viewerTask);
 
         logger.info("Task approved by admin {} and moved to HOLD. ViewerTaskId: {}", adminId, viewerTaskId);
 
         return Map.of(
             "success", true,
-            "status", "HOLD",
-            "message", "Task approved and placed on hold for " + HOLD_PERIOD_DAYS + " days",
-            "holdExpiry", viewerTask.getHoldExpiry()
+            "status", "ON_HOLD",
+            "message", "Task approved and placed on hold",
+            "holdEndTime", viewerTask.getHoldEndTime()
         );
     }
 
@@ -368,6 +367,10 @@ public class ViewerTaskFlowService {
         viewerTask.setRejectionReason(rejectionReason != null ? rejectionReason : "Invalid proof submission");
         viewerTask.setApprovedBy(adminId);
         viewerTaskEntityRepository.save(viewerTask);
+
+        TaskEntity task = taskRepository.findById(viewerTask.getTaskId())
+            .orElseThrow(() -> new RuntimeException("Task not found"));
+        removeLockedForTask(viewerTask.getViewerId(), task);
 
         // Issue strike to viewer
         userViolationService.strikeUser(
@@ -395,11 +398,11 @@ public class ViewerTaskFlowService {
         ViewerTaskEntity viewerTask = viewerTaskEntityRepository.findById(viewerTaskId)
             .orElseThrow(() -> new RuntimeException("ViewerTask not found"));
 
-        if (!"HOLD".equalsIgnoreCase(viewerTask.getStatus())) {
-            return Map.of("error", "Task is not in HOLD status", "currentStatus", viewerTask.getStatus());
+        if (!"ON_HOLD".equalsIgnoreCase(viewerTask.getStatus())) {
+            return Map.of("error", "Task is not in ON_HOLD status", "currentStatus", viewerTask.getStatus());
         }
 
-        if (viewerTask.getHoldExpiry() == null || viewerTask.getHoldExpiry().isAfter(LocalDateTime.now())) {
+        if (viewerTask.getHoldEndTime() == null || viewerTask.getHoldEndTime().isAfter(LocalDateTime.now())) {
             return Map.of("error", "Hold period not yet expired");
         }
 
@@ -417,23 +420,17 @@ public class ViewerTaskFlowService {
         viewerTask.setPaymentTxnId(txnId);
         viewerTaskEntityRepository.save(viewerTask);
 
-        // Credit wallet
-        double reward = task.getEarning() != null ? task.getEarning() : 0.0;
-        WalletEntity wallet = walletRepository.findByViewerId(viewerTask.getViewerId())
-            .orElseGet(() -> {
-                WalletEntity newWallet = new WalletEntity();
-                newWallet.setViewerId(viewerTask.getViewerId());
-                newWallet.setBalance(0.0);
-                return walletRepository.save(newWallet);
-            });
-        
-        wallet.setBalance(wallet.getBalance() + reward);
-        walletRepository.save(wallet);
+        task.setStatus("COMPLETED");
+        taskRepository.save(task);
+
+        // Release locked funds to available balance
+        BigDecimal reward = toAmount(task);
+        viewerWalletService.releaseToBalance(viewerTask.getViewerId(), reward);
 
         // Insert earnings record
         Earning earning = new Earning();
         earning.setViewerId(viewerTask.getViewerId());
-        earning.setAmount(reward);
+        earning.setAmount(reward.doubleValue());
         earning.setDescription("Task verified and paid. TaskId: " + task.getId() + ", Campaign: " + task.getCampaignId());
         earning.setCreatedAt(LocalDateTime.now());
         earningRepository.save(earning);
@@ -450,7 +447,7 @@ public class ViewerTaskFlowService {
             case "LIKE" -> campaign.setCurrentLikes(campaign.getCurrentLikes() + 1);
             case "COMMENT" -> campaign.setCurrentComments(campaign.getCurrentComments() + 1);
         }
-        campaign.setCurrentAmount(campaign.getCurrentAmount() + reward);
+        campaign.setCurrentAmount(campaign.getCurrentAmount() + reward.doubleValue());
         campaignRepository.save(campaign);
 
         // Update creator stats
@@ -503,9 +500,9 @@ public class ViewerTaskFlowService {
      * Get tasks ready for payment release
      */
     public List<ViewerTaskEntity> getTasksReadyForPayment() {
-        List<ViewerTaskEntity> holdTasks = viewerTaskEntityRepository.findByStatus("HOLD");
+        List<ViewerTaskEntity> holdTasks = viewerTaskEntityRepository.findByStatus("ON_HOLD");
         return holdTasks.stream()
-            .filter(t -> t.getHoldExpiry() != null && t.getHoldExpiry().isBefore(LocalDateTime.now()))
+            .filter(t -> t.getHoldEndTime() != null && t.getHoldEndTime().isBefore(LocalDateTime.now()))
             .toList();
     }
 
@@ -546,5 +543,43 @@ public class ViewerTaskFlowService {
         }
         
         return "VIEW"; // Default fallback
+    }
+
+    private BigDecimal toAmount(TaskEntity task) {
+        double reward = task != null && task.getEarning() != null ? task.getEarning() : 0.0;
+        return BigDecimal.valueOf(reward);
+    }
+
+    private String toViewerTaskType(TaskEntity task) {
+        if (task == null || task.getTaskType() == null) {
+            return TaskType.VIEW_LONG.name();
+        }
+        String upper = task.getTaskType().trim().toUpperCase();
+        if (upper.contains("SUBSCRIBE") || upper.equals("FOLLOW")) {
+            return TaskType.FOLLOW.name();
+        }
+        if (upper.contains("VIEW_SHORT") || upper.contains("SHORT")) {
+            return TaskType.VIEW_SHORT.name();
+        }
+        if (upper.contains("VIEW")) {
+            return TaskType.VIEW_LONG.name();
+        }
+        if (upper.equals("LIKE")) {
+            return TaskType.LIKE.name();
+        }
+        if (upper.equals("COMMENT")) {
+            return TaskType.COMMENT.name();
+        }
+        return TaskType.VIEW_LONG.name();
+    }
+
+    private void addLockedForTask(Long viewerId, TaskEntity task) {
+        BigDecimal reward = toAmount(task);
+        viewerWalletService.addEarnings(viewerId, reward);
+    }
+
+    private void removeLockedForTask(Long viewerId, TaskEntity task) {
+        BigDecimal reward = toAmount(task);
+        viewerWalletService.removeLockedEarnings(viewerId, reward);
     }
 }

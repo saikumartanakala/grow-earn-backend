@@ -21,9 +21,8 @@ public class ViewerTaskEntity {
     @Column(name = "platform", nullable = false)
     private Platform platform = Platform.YOUTUBE;
 
-    @Enumerated(EnumType.STRING)
     @Column(name = "task_type", nullable = false)
-    private TaskType taskType;
+    private String taskType;
 
     @Column(name = "target_url", length = 500)
     private String targetUrl;
@@ -149,8 +148,8 @@ public class ViewerTaskEntity {
 
     public Platform getPlatform() { return platform; }
     public void setPlatform(Platform platform) { this.platform = platform; }
-    public TaskType getTaskType() { return taskType; }
-    public void setTaskType(TaskType taskType) { this.taskType = taskType; }
+    public String getTaskType() { return taskType; }
+    public void setTaskType(String taskType) { this.taskType = taskType; }
     public String getTargetUrl() { return targetUrl; }
     public void setTargetUrl(String targetUrl) { this.targetUrl = targetUrl; }
 }

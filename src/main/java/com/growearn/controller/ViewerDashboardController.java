@@ -93,23 +93,6 @@ public class ViewerDashboardController {
         return result;
     }
 
-    @GetMapping("/wallet")
-    public Map<String, Object> getViewerWallet(HttpServletRequest request) {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null || !auth.isAuthenticated() || auth.getPrincipal() == null) {
-            return Map.of("error", "Unauthorized");
-        }
-        Long userId = Long.parseLong(auth.getPrincipal().toString());
-
-        Double totalEarnings = earningRepository.sumEarningsByViewerId(userId);
-        if (totalEarnings == null) totalEarnings = 0.0;
-
-        return Map.of(
-            "userId", userId,
-            "balance", totalEarnings
-        );
-    }
-
     @PostMapping("/tasks/{taskId}/claim")
     public Map<String, Object> claimTask(@PathVariable Long taskId, HttpServletRequest request) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();

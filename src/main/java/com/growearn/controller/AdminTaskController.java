@@ -4,6 +4,7 @@ import com.growearn.entity.*;
 import com.growearn.service.ViewerTaskFlowService;
 import com.growearn.service.TaskService;
 import com.growearn.service.UserViolationService;
+import com.growearn.service.ViewerWalletService;
 import com.growearn.repository.*;
 import com.growearn.security.JwtUtil;
 import com.growearn.dto.*;
@@ -11,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import jakarta.servlet.http.HttpServletRequest;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -28,10 +30,10 @@ public class AdminTaskController {
     private final TaskRepository taskRepository;
     private final CampaignRepository campaignRepository;
     private final UserRepository userRepository;
-    private final WalletRepository walletRepository;
     private final EarningRepository earningRepository;
     private final CreatorStatsRepository creatorStatsRepository;
     private final UserViolationService userViolationService;
+    private final ViewerWalletService viewerWalletService;
     private final JwtUtil jwtUtil;
 
     public AdminTaskController(ViewerTaskEntityRepository viewerTaskRepository, 
@@ -40,10 +42,10 @@ public class AdminTaskController {
                                TaskRepository taskRepository,
                                CampaignRepository campaignRepository,
                                UserRepository userRepository,
-                               WalletRepository walletRepository,
                                EarningRepository earningRepository,
                                CreatorStatsRepository creatorStatsRepository,
                                UserViolationService userViolationService,
+                               ViewerWalletService viewerWalletService,
                                JwtUtil jwtUtil) {
         this.viewerTaskRepository = viewerTaskRepository;
         this.viewerTaskService = viewerTaskService;
@@ -51,10 +53,10 @@ public class AdminTaskController {
         this.taskRepository = taskRepository;
         this.campaignRepository = campaignRepository;
         this.userRepository = userRepository;
-        this.walletRepository = walletRepository;
         this.earningRepository = earningRepository;
         this.creatorStatsRepository = creatorStatsRepository;
         this.userViolationService = userViolationService;
+        this.viewerWalletService = viewerWalletService;
         this.jwtUtil = jwtUtil;
     }
 
@@ -113,7 +115,9 @@ public class AdminTaskController {
     @GetMapping("/completed")
     public List<Map<String, Object>> getCompletedTasks() {
         logger.info("Admin requested completed tasks");
-        List<ViewerTaskEntity> completedTasks = viewerTaskRepository.findByStatus("COMPLETED");
+        List<ViewerTaskEntity> completedTasks = new ArrayList<>();
+        completedTasks.addAll(viewerTaskRepository.findByStatus("PAID"));
+        completedTasks.addAll(viewerTaskRepository.findByStatus("COMPLETED"));
         return enrichTasksWithDetails(completedTasks);
     }
 
@@ -135,7 +139,8 @@ public class AdminTaskController {
     @GetMapping("/stats")
     public Map<String, Object> getStats() {
         long pendingCount = viewerTaskRepository.findByStatus("UNDER_VERIFICATION").size();
-        long completedCount = viewerTaskRepository.findByStatus("COMPLETED").size();
+        long completedCount = viewerTaskRepository.findByStatus("PAID").size()
+            + viewerTaskRepository.findByStatus("COMPLETED").size();
         long totalTasks = taskRepository.count();
         long openTasks = taskRepository.countByStatus("OPEN");
         long totalViewers = userRepository.findByRole(Role.USER).size() + 
@@ -184,23 +189,21 @@ public class AdminTaskController {
                          "message", "Task is not under verification. Current status: " + vt.getStatus());
         }
 
-        // Move to HOLD status (48 hours default)
         LocalDateTime now = LocalDateTime.now();
-        LocalDateTime holdEndTime = now.plusHours(48);
-        
-        vt.setStatus("HOLD");
+
+        vt.setStatus("ON_HOLD");
         vt.setApprovedAt(now);
         vt.setApprovedBy(adminId);
         vt.setHoldStartTime(now);
-        vt.setHoldEndTime(holdEndTime);
+        vt.setHoldEndTime(now.plusDays(7));
         viewerTaskRepository.save(vt);
 
-        logger.info("Task {} approved and moved to HOLD until {}", viewerTaskId, holdEndTime);
+        logger.info("Task {} approved and moved to ON_HOLD until {}", viewerTaskId, vt.getHoldEndTime());
 
         return Map.of(
             "success", true,
             "message", "Task approved, now on hold",
-            "holdEndTime", holdEndTime.toString()
+            "holdEndTime", vt.getHoldEndTime().toString()
         );
     }
     
@@ -235,39 +238,21 @@ public class AdminTaskController {
         }
         double reward = task.getEarning() != null ? task.getEarning() : 0.0;
 
-        vt.setStatus("COMPLETED");
-        vt.setCompletedAt(LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
+
+        vt.setStatus("ON_HOLD");
+        vt.setApprovedAt(now);
         vt.setApprovedBy(adminId);
+        vt.setHoldStartTime(now);
+        vt.setHoldEndTime(now.plusDays(7));
         viewerTaskRepository.save(vt);
 
-        WalletEntity wallet = walletRepository.findByViewerId(vt.getViewerId()).orElseGet(() -> {
-            WalletEntity newWallet = new WalletEntity();
-            newWallet.setViewerId(vt.getViewerId());
-            newWallet.setBalance(0.0);
-            return walletRepository.save(newWallet);
-        });
-        wallet.setBalance(wallet.getBalance() + reward);
-        walletRepository.save(wallet);
-
-        Earning earning = new Earning();
-        earning.setViewerId(vt.getViewerId());
-        earning.setAmount(reward);
-        earning.setDescription("Task approved: task=" + task.getId() + ", type=" + task.getTaskType());
-        earning.setCreatedAt(LocalDateTime.now());
-        earningRepository.save(earning);
-
-        if (task.getCampaignId() != null) {
-            updateCampaignStats(task);
-        }
-
-        logger.info("Task {} approved. Credited {} to viewer {}", viewerTaskId, reward, vt.getViewerId());
+        logger.info("Task {} approved (legacy) and moved to ON_HOLD until {}", viewerTaskId, vt.getHoldEndTime());
 
         return Map.of(
             "success", true,
-            "message", "Task approved successfully",
-            "earning", reward,
-            "viewerId", vt.getViewerId(),
-            "taskId", viewerTaskId
+            "message", "Task approved and moved to hold",
+            "holdEndTime", vt.getHoldEndTime().toString()
         );
     }
 
@@ -309,6 +294,11 @@ public class AdminTaskController {
         vt.setRejectionReason(request.getReason());
         vt.setApprovedBy(adminId);
         viewerTaskRepository.save(vt);
+
+        TaskEntity task = taskRepository.findById(vt.getTaskId()).orElse(null);
+        if (task != null) {
+            viewerWalletService.removeLockedEarnings(vt.getViewerId(), toAmount(task));
+        }
         
         // Add strike to viewer for fraudulent submission
         try {
@@ -368,15 +358,10 @@ public class AdminTaskController {
         vt.setPaymentTxnId(generateTxnId());
         viewerTaskRepository.save(vt);
 
-        // Credit viewer wallet
-        WalletEntity wallet = walletRepository.findByViewerId(vt.getViewerId()).orElseGet(() -> {
-            WalletEntity newWallet = new WalletEntity();
-            newWallet.setViewerId(vt.getViewerId());
-            newWallet.setBalance(0.0);
-            return walletRepository.save(newWallet);
-        });
-        wallet.setBalance(wallet.getBalance() + reward);
-        walletRepository.save(wallet);
+        task.setStatus("COMPLETED");
+        taskRepository.save(task);
+
+        viewerWalletService.releaseToBalance(vt.getViewerId(), BigDecimal.valueOf(reward));
 
         // Record earning
         Earning earning = new Earning();
@@ -431,8 +416,8 @@ public class AdminTaskController {
      */
     private String mapFrontendStatus(String frontendStatus) {
         return switch (frontendStatus.toLowerCase()) {
-            case "pending" -> "UNDER_VERIFICATION";
-            case "on-hold" -> "HOLD";
+            case "pending", "pending_verification" -> "UNDER_VERIFICATION";
+            case "on-hold", "on_hold", "onhold", "hold" -> "ON_HOLD";
             case "paid" -> "PAID";
             case "rejected" -> "REJECTED";
             default -> frontendStatus.toUpperCase();
@@ -602,5 +587,10 @@ public class AdminTaskController {
             }
         }
         creatorStatsRepository.save(stats);
+    }
+
+    private BigDecimal toAmount(TaskEntity task) {
+        double reward = task != null && task.getEarning() != null ? task.getEarning() : 0.0;
+        return BigDecimal.valueOf(reward);
     }
 }

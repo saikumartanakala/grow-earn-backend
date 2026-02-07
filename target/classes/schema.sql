@@ -212,3 +212,60 @@ CREATE TABLE IF NOT EXISTS `earnings` (
 INSERT INTO users (email, password, role, status, is_verified, suspension_until) 
 VALUES ('viewer1@example.com', 'defaultPassword123', 'VIEWER', 'ACTIVE', true, NULL),
        ('viewer2@example.com', 'defaultPassword123', 'VIEWER', 'ACTIVE', false, NULL);
+
+-- ===============================
+-- PAYMENT SYSTEM TABLES
+-- ===============================
+
+-- Viewer Wallet: Tracks viewer earnings and balances
+CREATE TABLE IF NOT EXISTS `viewer_wallet` (
+  `user_id` BIGINT PRIMARY KEY,
+  `balance` DECIMAL(10, 2) DEFAULT 0.00,
+  `locked_balance` DECIMAL(10, 2) DEFAULT 0.00,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT `fk_viewer_wallet_user` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Creator Wallet: Tracks creator campaign funds
+CREATE TABLE IF NOT EXISTS `creator_wallet` (
+  `creator_id` BIGINT PRIMARY KEY,
+  `balance` DECIMAL(10, 2) DEFAULT 0.00,
+  `locked_balance` DECIMAL(10, 2) DEFAULT 0.00,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT `fk_creator_wallet_user` FOREIGN KEY (`creator_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Withdrawal Requests: Viewer withdrawal requests requiring admin approval
+CREATE TABLE IF NOT EXISTS `withdrawal_requests` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `user_id` BIGINT NOT NULL,
+  `amount` DECIMAL(10, 2) NOT NULL,
+  `upi_id` VARCHAR(100) NOT NULL,
+  `status` ENUM('PENDING', 'APPROVED', 'PAID', 'REJECTED') DEFAULT 'PENDING',
+  `requested_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `processed_at` TIMESTAMP NULL,
+  `processed_by` BIGINT NULL,
+  `rejection_reason` TEXT NULL,
+  INDEX `idx_withdrawal_requests_user_id` (`user_id`),
+  INDEX `idx_withdrawal_requests_status` (`status`),
+  CONSTRAINT `fk_withdrawal_requests_user` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_withdrawal_requests_processor` FOREIGN KEY (`processed_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Creator Top-ups: Creator fund additions requiring admin approval
+CREATE TABLE IF NOT EXISTS `creator_topups` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `creator_id` BIGINT NOT NULL,
+  `amount` DECIMAL(10, 2) NOT NULL,
+  `upi_reference` VARCHAR(255) NOT NULL,
+  `proof_url` VARCHAR(500),
+  `status` ENUM('PENDING', 'APPROVED', 'REJECTED') DEFAULT 'PENDING',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `approved_at` TIMESTAMP NULL,
+  `approved_by` BIGINT NULL,
+  `rejection_reason` TEXT NULL,
+  INDEX `idx_creator_topups_creator_id` (`creator_id`),
+  INDEX `idx_creator_topups_status` (`status`),
+  CONSTRAINT `fk_creator_topups_creator` FOREIGN KEY (`creator_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_creator_topups_approver` FOREIGN KEY (`approved_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

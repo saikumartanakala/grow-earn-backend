@@ -55,7 +55,7 @@ public class RiskAnalysisService {
 
         // Get platform and task type for risk adjustments
         Platform platform = task.getPlatform() != null ? task.getPlatform() : Platform.YOUTUBE;
-        TaskType taskType = task.getTaskType() != null ? task.getTaskType() : TaskType.VIEW_LONG;
+        TaskType taskType = resolveTaskType(task.getTaskType());
 
         // Apply platform-specific risk multiplier
         double taskTypeMultiplier = platformTaskMapper.getRiskMultiplier(taskType);
@@ -194,7 +194,7 @@ public class RiskAnalysisService {
         long tasksLast24Hours = viewerTaskRepository.findAll().stream()
             .filter(t -> viewerId.equals(t.getViewerId()))
             .filter(t -> platform.equals(t.getPlatform()))
-            .filter(t -> taskType.equals(t.getTaskType()))
+            .filter(t -> taskType.equals(resolveTaskType(t.getTaskType())))
             .filter(t -> t.getSubmittedAt() != null && t.getSubmittedAt().isAfter(oneDayAgo))
             .count();
 
@@ -219,6 +219,21 @@ public class RiskAnalysisService {
         }
 
         return 0.0;
+    }
+
+    private TaskType resolveTaskType(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return TaskType.VIEW_LONG;
+        }
+        String upper = raw.trim().toUpperCase();
+        return switch (upper) {
+            case "FOLLOW", "SUBSCRIBE" -> TaskType.FOLLOW;
+            case "VIEW_SHORT", "SHORT_VIEW", "SHORT" -> TaskType.VIEW_SHORT;
+            case "VIEW_LONG", "VIEW", "VIDEO_VIEW", "VIDEO VIEW" -> TaskType.VIEW_LONG;
+            case "LIKE" -> TaskType.LIKE;
+            case "COMMENT" -> TaskType.COMMENT;
+            default -> TaskType.VIEW_LONG;
+        };
     }
 
     /**

@@ -8,6 +8,7 @@ import jakarta.transaction.Transactional;
 import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @Service
@@ -17,22 +18,34 @@ public class CampaignService {
     private final UserRepository userRepository;
     private final CreatorStatsRepository creatorStatsRepository;
     private final TaskService taskService;
+    private final CreatorWalletService creatorWalletService;
 
     public CampaignService(
             CampaignRepository campaignRepository,
             UserRepository userRepository,
             CreatorStatsRepository creatorStatsRepository,
-            TaskService taskService
+            TaskService taskService,
+            CreatorWalletService creatorWalletService
     ) {
         this.campaignRepository = campaignRepository;
         this.userRepository = userRepository;
         this.creatorStatsRepository = creatorStatsRepository;
         this.taskService = taskService;
+        this.creatorWalletService = creatorWalletService;
     }
 
 
     @Transactional
     public Campaign createCampaign(Campaign campaign) {
+        if (campaign.getTotalAmount() <= 0.0) {
+            throw new RuntimeException("Total amount must be greater than zero");
+        }
+        BigDecimal totalAmount = BigDecimal.valueOf(campaign.getTotalAmount());
+        org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(CampaignService.class);
+        logger.info("Locking creator wallet for campaign. creatorId={}, totalAmount={}", campaign.getCreatorId(), totalAmount);
+        creatorWalletService.lockBalance(campaign.getCreatorId(), totalAmount);
+        logger.info("Locked creator wallet for campaign. creatorId={}, totalAmount={}", campaign.getCreatorId(), totalAmount);
+
         // Ensure creator dashboard/stats entry exists
         creatorStatsRepository.findByCreatorId(campaign.getCreatorId())
             .orElseGet(() -> creatorStatsRepository.save(new CreatorStats(campaign.getCreatorId())));

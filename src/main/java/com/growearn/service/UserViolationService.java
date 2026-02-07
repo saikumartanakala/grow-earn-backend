@@ -143,6 +143,15 @@ public class UserViolationService {
     }
 
     /**
+     * Check if user has active violations that prevent financial transactions
+     */
+    public boolean hasActiveViolations(Long userId) {
+        int strikeCount = violationRepository.getMaxStrikeCount(userId);
+        // Users with any strikes greater than 0 are restricted from financial transactions
+        return strikeCount > 0;
+    }
+
+    /**
      * Get violation summary for a user
      */
     public Map<String, Object> getViolationSummary(Long userId) {

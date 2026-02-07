@@ -23,6 +23,7 @@ import com.growearn.repository.TaskRepository;
 import com.growearn.repository.ViewerTaskEntityRepository;
 import com.growearn.security.JwtUtil;
 import com.growearn.service.CampaignService;
+import com.growearn.service.CreatorWalletService;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 @RestController
@@ -34,13 +35,16 @@ public class CampaignController {
     private final TaskRepository taskRepository;
     private final ViewerTaskEntityRepository viewerTaskEntityRepository;
     private final JwtUtil jwtUtil;
+    private final CreatorWalletService creatorWalletService;
 
     public CampaignController(CampaignService campaignService, TaskRepository taskRepository,
-                              ViewerTaskEntityRepository viewerTaskEntityRepository, JwtUtil jwtUtil) {
+                              ViewerTaskEntityRepository viewerTaskEntityRepository, JwtUtil jwtUtil,
+                              CreatorWalletService creatorWalletService) {
         this.campaignService = campaignService;
         this.taskRepository = taskRepository;
         this.viewerTaskEntityRepository = viewerTaskEntityRepository;
         this.jwtUtil = jwtUtil;
+        this.creatorWalletService = creatorWalletService;
     }
 
     /**
@@ -210,6 +214,13 @@ public class CampaignController {
             dto.put("commentsTaskCount", saved.getCommentsTaskCount());
             dto.put("totalAmount", saved.getTotalAmount());
             dto.put("status", saved.getStatus());
+            com.growearn.entity.CreatorWallet wallet = creatorWalletService.getOrCreateWallet(creatorId);
+            java.math.BigDecimal available = wallet.getBalance().subtract(wallet.getLockedBalance());
+            dto.put("wallet", Map.of(
+                "balance", wallet.getBalance(),
+                "available", available,
+                "locked", wallet.getLockedBalance()
+            ));
             return ResponseEntity.ok(dto);
         } catch (Exception e) {
             System.out.println("[CampaignController] Failed to create campaign: " + e.getMessage());
