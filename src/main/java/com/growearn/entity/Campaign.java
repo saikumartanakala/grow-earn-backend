@@ -33,6 +33,10 @@ public class Campaign {
     private String videoLink;
     private String videoDuration;
 
+    // Timer enforcement fields (nullable)
+    private Integer contentDuration;
+    private String platformType;
+
 
     private int subscriberGoal;
     private int viewsGoal;
@@ -106,6 +110,12 @@ public class Campaign {
 
     public String getVideoDuration() { return videoDuration; }
     public void setVideoDuration(String videoDuration) { this.videoDuration = videoDuration; }
+
+    public Integer getContentDuration() { return contentDuration; }
+    public void setContentDuration(Integer contentDuration) { this.contentDuration = contentDuration; }
+
+    public String getPlatformType() { return platformType; }
+    public void setPlatformType(String platformType) { this.platformType = platformType; }
 
 
     public int getSubscriberGoal() { return subscriberGoal; }

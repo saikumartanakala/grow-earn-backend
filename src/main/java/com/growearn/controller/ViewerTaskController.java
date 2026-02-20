@@ -2,6 +2,7 @@ package com.growearn.controller;
 
 import com.growearn.dto.TaskSubmissionRequest;
 import com.growearn.service.ViewerTaskFlowService;
+import com.growearn.service.TaskTimerService;
 import com.growearn.entity.ViewerTaskEntity;
 import com.growearn.entity.Earning;
 import com.growearn.security.JwtUtil;
@@ -26,6 +27,7 @@ public class ViewerTaskController {
     private static final Logger logger = LoggerFactory.getLogger(ViewerTaskController.class);
 
     private final ViewerTaskFlowService viewerTaskFlowService;
+    private final TaskTimerService taskTimerService;
     private final JwtUtil jwtUtil;
     private final TaskRepository taskRepository;
     private final ViewerTaskEntityRepository viewerTaskEntityRepository;
@@ -36,8 +38,10 @@ public class ViewerTaskController {
     public ViewerTaskController(ViewerTaskFlowService viewerTaskFlowService, JwtUtil jwtUtil,
                                 TaskRepository taskRepository, ViewerTaskEntityRepository viewerTaskEntityRepository,
                                 EarningRepository earningRepository, ViewerWalletService viewerWalletService,
-                                com.growearn.repository.CampaignRepository campaignRepository) {
+                                com.growearn.repository.CampaignRepository campaignRepository,
+                                TaskTimerService taskTimerService) {
         this.viewerTaskFlowService = viewerTaskFlowService;
+        this.taskTimerService = taskTimerService;
         this.jwtUtil = jwtUtil;
         this.taskRepository = taskRepository;
         this.viewerTaskEntityRepository = viewerTaskEntityRepository;
@@ -92,6 +96,36 @@ public class ViewerTaskController {
             logger.error("Error submitting task with proof", e);
             return Map.of("success", false, "message", e.getMessage());
         }
+    }
+
+    /**
+     * Start timer for a task (ADD ONLY)
+     * POST /api/viewer/tasks/startTimer
+     * Body: { "taskId": 123 }
+     */
+    @PostMapping("/startTimer")
+    public Map<String, Object> startTimer(@RequestBody Map<String, Object> body, HttpServletRequest req) {
+        String auth = req.getHeader("Authorization");
+        if (auth == null || !auth.startsWith("Bearer ")) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.UNAUTHORIZED, "Missing authentication token");
+        }
+        Long viewerId = jwtUtil.extractUserId(auth.substring(7));
+        Long taskId = null;
+        if (body.containsKey("taskId")) {
+            taskId = Long.valueOf(String.valueOf(body.get("taskId")));
+        } else if (body.containsKey("id")) {
+            taskId = Long.valueOf(String.valueOf(body.get("id")));
+        }
+        if (taskId == null) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.BAD_REQUEST, "Task ID is required");
+        }
+        Map<String, Object> result = taskTimerService.startTimer(taskId, viewerId);
+        return Map.of(
+            "unlockTime", result.get("unlockTime"),
+            "requiredWatchSeconds", result.get("requiredWatchSeconds")
+        );
     }
 
     /**
@@ -236,16 +270,19 @@ public class ViewerTaskController {
             Long viewerId = jwtUtil.extractUserId(auth.substring(7));
             
             // Check if proof data is provided (new verification pipeline)
-            if (body.containsKey("proofUrl") && body.get("proofUrl") != null) {
-                String proofUrl = String.valueOf(body.get("proofUrl"));
+            if ((body.containsKey("proofUrl") && body.get("proofUrl") != null) ||
+                (body.containsKey("proof") && body.get("proof") != null)) {
+                String proofUrl = body.containsKey("proofUrl") && body.get("proofUrl") != null
+                    ? String.valueOf(body.get("proofUrl"))
+                    : String.valueOf(body.get("proof"));
                 String proofPublicId = body.containsKey("publicId") ? String.valueOf(body.get("publicId")) : null;
                 String proofText = body.containsKey("proofText") ? String.valueOf(body.get("proofText")) : null;
                 String deviceFingerprint = req.getHeader("X-Device-Fingerprint");
                 String ipAddress = extractIpAddress(req);
-                
+
                 logger.info("Task submission with proof: taskId={}, viewerId={}, proofUrl={}", 
                            taskId, viewerId, proofUrl);
-                
+
                 // Use new verification pipeline
                 return viewerTaskFlowService.submitTaskWithProof(
                     taskId, viewerId, proofUrl, proofPublicId, proofText, deviceFingerprint, ipAddress

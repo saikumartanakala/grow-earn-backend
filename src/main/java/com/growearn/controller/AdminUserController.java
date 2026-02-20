@@ -744,7 +744,10 @@ public class AdminUserController {
             user.getIsVerified(),
             user.getSuspensionUntil() != null ? user.getSuspensionUntil().toString() : null,
             user.getCreatedAt() != null ? user.getCreatedAt().toString() : null,
-            user.getStatus() == AccountStatus.ACTIVE
+            user.getStatus() == AccountStatus.ACTIVE,
+            user.getDeviceFingerprint(),
+            user.getFirstIp(),
+            user.getLastIp()
         );
         logger.info("DTO created: " + dto);
         return dto;

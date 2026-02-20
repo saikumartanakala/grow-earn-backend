@@ -4,8 +4,11 @@ import com.growearn.entity.*;
 import com.growearn.repository.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
+import java.util.concurrent.ConcurrentHashMap;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
@@ -27,6 +30,7 @@ public class ViewerTaskFlowService {
     private final UserViolationService userViolationService;
     private final PlatformTaskMapper platformTaskMapper;
     private final ViewerWalletService viewerWalletService;
+    private static final ConcurrentHashMap<String, Object> SUBMIT_LOCKS = new ConcurrentHashMap<>();
 
     public ViewerTaskFlowService(TaskRepository taskRepository,
                                  ViewerTaskEntityRepository viewerTaskEntityRepository,
@@ -219,10 +223,13 @@ public class ViewerTaskFlowService {
      * Submit task with proof and automatic risk analysis
      * STAGE 1 & 2: Task Submission + Auto Analysis
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Map<String, Object> submitTaskWithProof(Long taskId, Long viewerId, String proofUrl, 
                                                      String proofPublicId, String proofText,
                                                      String deviceFingerprint, String ipAddress) {
+        String lockKey = viewerId + ":" + taskId;
+        Object lock = SUBMIT_LOCKS.computeIfAbsent(lockKey, k -> new Object());
+        synchronized (lock) {
         // Check if viewer already has this task
         var existingViewerTask = viewerTaskEntityRepository.findByTaskIdAndViewerId(taskId, viewerId);
         
@@ -234,6 +241,11 @@ public class ViewerTaskFlowService {
                 "PAID".equalsIgnoreCase(viewerTask.getStatus()) ||
                 "COMPLETED".equalsIgnoreCase(viewerTask.getStatus())) {
                 throw new RuntimeException("Task already submitted or completed");
+            }
+            // Timer enforcement (backward compatible)
+            if (viewerTask.getTaskUnlockTime() != null &&
+                LocalDateTime.now().isBefore(viewerTask.getTaskUnlockTime())) {
+                throw new RuntimeException("Watch time not completed");
             }
         } else {
             // Create new viewer task
@@ -263,11 +275,25 @@ public class ViewerTaskFlowService {
         viewerTask.setDeviceFingerprint(deviceFingerprint);
         viewerTask.setIpAddress(ipAddress);
         viewerTask.setSubmittedAt(LocalDateTime.now());
+        viewerTask.setProofSubmitted(true);
+        if (viewerTask.getTaskStartTime() != null) {
+            long seconds = java.time.Duration.between(viewerTask.getTaskStartTime(), LocalDateTime.now()).getSeconds();
+            viewerTask.setWatchSeconds((int) Math.max(0, seconds));
+        }
 
         // STAGE 2: Auto Risk Analysis
-        Map<String, Object> riskAnalysis = riskAnalysisService.analyzeRisk(
-            viewerTask, proofUrl, proofText, deviceFingerprint, ipAddress
-        );
+        Map<String, Object> riskAnalysis;
+        try {
+            riskAnalysis = riskAnalysisService.analyzeRisk(
+                viewerTask, proofUrl, proofText, deviceFingerprint, ipAddress
+            );
+        } catch (Exception e) {
+            LoggerFactory.getLogger(ViewerTaskFlowService.class).error(
+                "Risk analysis failed. taskId={}, viewerId={}, proofUrl={}",
+                taskId, viewerId, proofUrl, e
+            );
+            throw new RuntimeException("Risk analysis failed: " + e.getMessage());
+        }
 
         double riskScore = (Double) riskAnalysis.get("riskScore");
         boolean autoFlag = (Boolean) riskAnalysis.get("autoFlag");
@@ -280,7 +306,7 @@ public class ViewerTaskFlowService {
         if (autoReject) {
             viewerTask.setStatus("REJECTED");
             viewerTask.setRejectionReason("Auto-rejected: " + riskAnalysis.get("reasons"));
-            viewerTaskEntityRepository.save(viewerTask);
+            viewerTask = saveOrUpdateOnDuplicate(viewerTask, taskId, viewerId);
 
             // Issue strike for high-risk submission
             userViolationService.strikeUser(viewerId, "FRAUDULENT_SUBMISSION", 
@@ -300,7 +326,7 @@ public class ViewerTaskFlowService {
         viewerTask.setStatus("UNDER_VERIFICATION");
         viewerTask.setTaskType(toViewerTaskType(taskRepository.findById(taskId)
             .orElseThrow(() -> new RuntimeException("Task not found"))));
-        viewerTaskEntityRepository.save(viewerTask);
+        viewerTask = saveOrUpdateOnDuplicate(viewerTask, taskId, viewerId);
 
         TaskEntity task = taskRepository.findById(taskId)
             .orElseThrow(() -> new RuntimeException("Task not found"));
@@ -317,6 +343,38 @@ public class ViewerTaskFlowService {
             "riskScore", riskScore,
             "riskLevel", riskAnalysis.get("riskLevel")
         );
+        }
+    }
+
+    private ViewerTaskEntity saveOrUpdateOnDuplicate(ViewerTaskEntity viewerTask, Long taskId, Long viewerId) {
+        try {
+            return viewerTaskEntityRepository.saveAndFlush(viewerTask);
+        } catch (DataIntegrityViolationException e) {
+            // Handle duplicate viewer_task (unique viewer_id + task_id)
+            int updated = viewerTaskEntityRepository.updateProofSubmission(
+                taskId,
+                viewerId,
+                viewerTask.getProofUrl(),
+                viewerTask.getProofPublicId(),
+                viewerTask.getProofText(),
+                viewerTask.getProof(),
+                viewerTask.getDeviceFingerprint(),
+                viewerTask.getIpAddress(),
+                viewerTask.getSubmittedAt(),
+                viewerTask.getProofSubmitted(),
+                viewerTask.getWatchSeconds(),
+                viewerTask.getStatus(),
+                viewerTask.getTaskType(),
+                viewerTask.getRejectionReason(),
+                viewerTask.getRiskScore(),
+                viewerTask.getAutoFlag()
+            );
+            if (updated <= 0) {
+                throw e;
+            }
+            return viewerTaskEntityRepository.findByTaskIdAndViewerId(taskId, viewerId)
+                .orElseThrow(() -> e);
+        }
     }
 
     /**

@@ -94,6 +94,19 @@ public class ViewerTaskEntity {
     @Column(name = "verified_at")
     private LocalDateTime verifiedAt;
 
+    // Timer enforcement fields (nullable)
+    @Column(name = "task_start_time")
+    private LocalDateTime taskStartTime;
+
+    @Column(name = "task_unlock_time")
+    private LocalDateTime taskUnlockTime;
+
+    @Column(name = "proof_submitted")
+    private Boolean proofSubmitted;
+
+    @Column(name = "watch_seconds")
+    private Integer watchSeconds;
+
     // Getters/setters
     public Long getId() { return id; }
     public Long getTaskId() { return taskId; }
@@ -145,6 +158,17 @@ public class ViewerTaskEntity {
     public void setHoldEndTime(LocalDateTime holdEndTime) { this.holdEndTime = holdEndTime; }
     public LocalDateTime getVerifiedAt() { return verifiedAt; }
     public void setVerifiedAt(LocalDateTime verifiedAt) { this.verifiedAt = verifiedAt; }
+
+    public LocalDateTime getTaskStartTime() { return taskStartTime; }
+    public void setTaskStartTime(LocalDateTime taskStartTime) { this.taskStartTime = taskStartTime; }
+    public LocalDateTime getTaskUnlockTime() { return taskUnlockTime; }
+    public void setTaskUnlockTime(LocalDateTime taskUnlockTime) { this.taskUnlockTime = taskUnlockTime; }
+
+    public Boolean getProofSubmitted() { return proofSubmitted; }
+    public void setProofSubmitted(Boolean proofSubmitted) { this.proofSubmitted = proofSubmitted; }
+
+    public Integer getWatchSeconds() { return watchSeconds; }
+    public void setWatchSeconds(Integer watchSeconds) { this.watchSeconds = watchSeconds; }
 
     public Platform getPlatform() { return platform; }
     public void setPlatform(Platform platform) { this.platform = platform; }

@@ -3,7 +3,9 @@ package com.growearn.repository;
 import com.growearn.entity.ViewerTaskEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 
 public interface ViewerTaskEntityRepository extends JpaRepository<ViewerTaskEntity, Long> {
@@ -27,4 +29,41 @@ public interface ViewerTaskEntityRepository extends JpaRepository<ViewerTaskEnti
     
     // Find viewer tasks by task IDs (all statuses)
     List<ViewerTaskEntity> findByTaskIdIn(List<Long> taskIds);
+
+    @Modifying
+    @Transactional
+    @Query("""
+        UPDATE ViewerTaskEntity v
+        SET v.proofUrl = :proofUrl,
+            v.proofPublicId = :proofPublicId,
+            v.proofText = :proofText,
+            v.proof = :proof,
+            v.deviceFingerprint = :deviceFingerprint,
+            v.ipAddress = :ipAddress,
+            v.submittedAt = :submittedAt,
+            v.proofSubmitted = :proofSubmitted,
+            v.watchSeconds = :watchSeconds,
+            v.status = :status,
+            v.taskType = :taskType,
+            v.rejectionReason = :rejectionReason,
+            v.riskScore = :riskScore,
+            v.autoFlag = :autoFlag
+        WHERE v.taskId = :taskId AND v.viewerId = :viewerId
+        """)
+    int updateProofSubmission(@Param("taskId") Long taskId,
+                              @Param("viewerId") Long viewerId,
+                              @Param("proofUrl") String proofUrl,
+                              @Param("proofPublicId") String proofPublicId,
+                              @Param("proofText") String proofText,
+                              @Param("proof") String proof,
+                              @Param("deviceFingerprint") String deviceFingerprint,
+                              @Param("ipAddress") String ipAddress,
+                              @Param("submittedAt") java.time.LocalDateTime submittedAt,
+                              @Param("proofSubmitted") Boolean proofSubmitted,
+                              @Param("watchSeconds") Integer watchSeconds,
+                              @Param("status") String status,
+                              @Param("taskType") String taskType,
+                              @Param("rejectionReason") String rejectionReason,
+                              @Param("riskScore") Double riskScore,
+                              @Param("autoFlag") Boolean autoFlag);
 }
