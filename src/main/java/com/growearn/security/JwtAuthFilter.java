@@ -11,6 +11,8 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -24,10 +26,12 @@ import java.util.Optional;
 
 @Component
 public class JwtAuthFilter extends OncePerRequestFilter {
+    private static final Logger logger = LoggerFactory.getLogger(JwtAuthFilter.class);
     private final UserRepository userRepository;
     private final JwtUtil jwtUtil;
     private final RevokedTokenRepository revokedTokenRepository;
     private final DeviceRegistryRepository deviceRegistryRepository;
+    private final TokenBlacklistService tokenBlacklistService;
 
     /**
      * Extract JWT token from Authorization header
@@ -40,11 +44,12 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         return null;
     }
 
-    public JwtAuthFilter(UserRepository userRepository, JwtUtil jwtUtil, RevokedTokenRepository revokedTokenRepository, DeviceRegistryRepository deviceRegistryRepository) {
+    public JwtAuthFilter(UserRepository userRepository, JwtUtil jwtUtil, RevokedTokenRepository revokedTokenRepository, DeviceRegistryRepository deviceRegistryRepository, TokenBlacklistService tokenBlacklistService) {
         this.userRepository = userRepository;
         this.jwtUtil = jwtUtil;
         this.revokedTokenRepository = revokedTokenRepository;
         this.deviceRegistryRepository = deviceRegistryRepository;
+        this.tokenBlacklistService = tokenBlacklistService;
     }
 
     @Override
@@ -55,14 +60,25 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 filterChain.doFilter(request, response);
                 return;
             }
+            if (tokenBlacklistService.isBlacklisted(token)) {
+                logSecurity("REJECT", "Token blacklisted", null, request);
+                sendUnauthorizedResponse(request, response, "Token has been revoked");
+                return;
+            }
             if (isTokenRevoked(token)) {
                 logSecurity("REJECT", "Token revoked", null, request);
-                sendUnauthorizedResponse(response, "Token has been revoked");
+                sendUnauthorizedResponse(request, response, "Token has been revoked");
                 return;
             }
             if (jwtUtil.isTokenExpired(token)) {
                 logSecurity("REJECT", "Token expired", null, request);
-                sendUnauthorizedResponse(response, "Session expired. Please log in again.");
+                sendUnauthorizedResponse(request, response, "Session expired. Please log in again.");
+                return;
+            }
+            String tokenType = jwtUtil.extractTokenType(token);
+            if (tokenType != null && !"access".equalsIgnoreCase(tokenType)) {
+                logSecurity("REJECT", "Invalid token type", null, request);
+                sendUnauthorizedResponse(request, response, "Invalid token");
                 return;
             }
             Long userId = jwtUtil.extractUserId(token);
@@ -70,7 +86,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             Optional<User> userOpt = userRepository.findById(userId);
             if (userOpt.isEmpty()) {
                 logSecurity("REJECT", "User not found", userId, request);
-                sendUnauthorizedResponse(response, "User not found");
+                sendUnauthorizedResponse(request, response, "User not found");
                 return;
             }
             User user = userOpt.get();
@@ -78,28 +94,28 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             String deviceFingerprint = request.getHeader("X-Device-Fingerprint");
             if (deviceFingerprint == null || deviceFingerprint.isBlank()) {
                 logSecurity("REJECT", "Missing device fingerprint", userId, request);
-                sendUnauthorizedResponse(response, "Device fingerprint required");
+                sendUnauthorizedResponse(request, response, "Device fingerprint required");
                 return;
             }
             if (user.getDeviceFingerprint() == null || !user.getDeviceFingerprint().equals(deviceFingerprint)) {
                 // Revoke token, log, and block
                 revokeToken(token, user, "Device fingerprint mismatch");
                 logSecurity("REVOKE", "Device fingerprint mismatch", userId, request);
-                sendUnauthorizedResponse(response, "Device mismatch");
+                sendUnauthorizedResponse(request, response, "Device mismatch");
                 return;
             }
             // Account status enforcement
             AccountStatus status = user.getStatus() != null ? user.getStatus() : AccountStatus.ACTIVE;
             if (status == AccountStatus.BANNED) {
                 logSecurity("REJECT", "User banned", userId, request);
-                sendForbiddenResponse(response, "Your account has been permanently banned.");
+                sendForbiddenResponse(request, response, "Your account has been permanently banned.");
                 return;
             }
             if (status == AccountStatus.SUSPENDED) {
                 if (user.getSuspensionUntil() == null || LocalDateTime.now().isBefore(user.getSuspensionUntil())) {
                     String message = user.getSuspensionUntil() != null ? "Your account is suspended until " + user.getSuspensionUntil() : "Your account is suspended. Please contact support.";
                     logSecurity("REJECT", "User suspended", userId, request);
-                    sendForbiddenResponse(response, message);
+                    sendForbiddenResponse(request, response, message);
                     return;
                 } else {
                     // Suspension expired, auto-reactivate
@@ -113,9 +129,10 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             String raw = role != null ? role.toUpperCase().trim() : "<none>";
             String mapped;
             switch (raw) {
-                case "USER", "VIEWER", "VIEWER_ROLE" -> mapped = "VIEWER";
-                case "CREATOR", "CONTENT_CREATOR" -> mapped = "CREATOR";
-                case "ADMIN", "ADMINISTRATOR" -> mapped = "ADMIN";
+                case "USER", "ROLE_USER" -> mapped = "USER";
+                case "VIEWER", "VIEWER_ROLE" -> mapped = "VIEWER";
+                case "CREATOR", "CONTENT_CREATOR", "ROLE_CREATOR" -> mapped = "CREATOR";
+                case "ADMIN", "ADMINISTRATOR", "ROLE_ADMIN" -> mapped = "ADMIN";
                 default -> mapped = raw.replaceFirst("^ROLE_", "");
             }
             String normalized = mapped.startsWith("ROLE_") ? mapped : "ROLE_" + mapped;
@@ -148,7 +165,14 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         if (ip == null) ip = request.getRemoteAddr();
         String device = request.getHeader("X-Device-Fingerprint");
         String userAgent = request.getHeader("User-Agent");
-        System.out.println(String.format("{\"event\":\"jwt_security\",\"action\":\"%s\",\"userId\":%s,\"ip\":\"%s\",\"device\":\"%s\",\"userAgent\":\"%s\",\"message\":\"%s\"}", action, userId, ip, device, userAgent, message));
+        String logLine = "jwt_security action={} userId={} ip={} device={} userAgent={} message={}";
+        if ("ERROR".equalsIgnoreCase(action)) {
+            logger.error(logLine, action, userId, ip, device, userAgent, message);
+        } else if ("REJECT".equalsIgnoreCase(action) || "REVOKE".equalsIgnoreCase(action)) {
+            logger.warn(logLine, action, userId, ip, device, userAgent, message);
+        } else {
+            logger.info(logLine, action, userId, ip, device, userAgent, message);
+        }
     }
 
     // ...existing code for isTokenRevoked, sendUnauthorizedResponse, sendForbiddenResponse...
@@ -169,18 +193,18 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     /**
      * Send 401 Unauthorized response
      */
-    private void sendUnauthorizedResponse(HttpServletResponse response, String message) throws IOException {
+    private void sendUnauthorizedResponse(HttpServletRequest request, HttpServletResponse response, String message) throws IOException {
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         response.setContentType("application/json");
-        response.getWriter().write("{\"error\":\"unauthorized\",\"message\":\"" + message + "\"}");
+        response.getWriter().write("{\"timestamp\":\"" + java.time.Instant.now() + "\",\"status\":401,\"error\":\"unauthorized\",\"message\":\"" + message + "\",\"path\":\"" + request.getRequestURI() + "\"}");
     }
 
     /**
      * Send 403 Forbidden response
      */
-    private void sendForbiddenResponse(HttpServletResponse response, String message) throws IOException {
+    private void sendForbiddenResponse(HttpServletRequest request, HttpServletResponse response, String message) throws IOException {
         response.setStatus(HttpServletResponse.SC_FORBIDDEN);
         response.setContentType("application/json");
-        response.getWriter().write("{\"error\":\"forbidden\",\"message\":\"" + message + "\"}");
+        response.getWriter().write("{\"timestamp\":\"" + java.time.Instant.now() + "\",\"status\":403,\"error\":\"forbidden\",\"message\":\"" + message + "\",\"path\":\"" + request.getRequestURI() + "\"}");
     }
 }

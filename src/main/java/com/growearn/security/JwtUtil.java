@@ -19,8 +19,8 @@ public class JwtUtil {
     @Value("${jwt.secret}")
     private String jwtSecret;
 
-    // 24 hours
-    private static final long JWT_EXPIRATION_MS = 24 * 60 * 60 * 1000;
+    @Value("${jwt.access.expiration-minutes:15}")
+    private long accessExpirationMinutes;
 
     // ✅ Generate signing key safely
     private Key getSigningKey() {
@@ -32,18 +32,21 @@ public class JwtUtil {
         return Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8));
     }
 
-    // ✅ Generate JWT token
+    // ✅ Generate access token (compat method)
     public String generateToken(Long userId, String role) {
+        return generateAccessToken(userId, role);
+    }
 
+    public String generateAccessToken(Long userId, String role) {
+        long expMs = accessExpirationMinutes * 60 * 1000;
         return Jwts.builder()
-                .setSubject(String.valueOf(userId))
-                .claim("role", role)
-                .setIssuedAt(new Date())
-                .setExpiration(
-                        new Date(System.currentTimeMillis() + JWT_EXPIRATION_MS)
-                )
-                .signWith(getSigningKey(), SignatureAlgorithm.HS256)
-                .compact();
+            .setSubject(String.valueOf(userId))
+            .claim("role", role)
+            .claim("typ", "access")
+            .setIssuedAt(new Date())
+            .setExpiration(new Date(System.currentTimeMillis() + expMs))
+            .signWith(getSigningKey(), SignatureAlgorithm.HS256)
+            .compact();
     }
 
     // ✅ Validate token (signature + expiration)
@@ -66,10 +69,18 @@ public class JwtUtil {
         return parseClaims(token).get("role", String.class);
     }
 
+    public String extractTokenType(String token) {
+        return parseClaims(token).get("typ", String.class);
+    }
+
     // ✅ Check if token is expired
     public boolean isTokenExpired(String token) {
         Date expiration = parseClaims(token).getExpiration();
         return expiration.before(new Date());
+    }
+
+    public Date getExpiration(String token) {
+        return parseClaims(token).getExpiration();
     }
 
     // 🔒 Centralized claim parsing

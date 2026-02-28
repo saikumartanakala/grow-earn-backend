@@ -10,6 +10,9 @@
 -- ALTER TABLE users ADD COLUMN IF NOT EXISTS suspension_until TIMESTAMP NULL;
 -- ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
 -- ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;
+-- ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(50) NOT NULL DEFAULT 'USER';
+-- ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_attempts INT DEFAULT 0;
+-- ALTER TABLE users ADD COLUMN IF NOT EXISTS account_locked_until DATETIME NULL;
 -- ===============================
 -- DEVICE REGISTRY TABLE
 -- ===============================
@@ -77,6 +80,21 @@ CREATE TABLE IF NOT EXISTS `revoked_tokens` (
   `reason` VARCHAR(100),
   INDEX `idx_revoked_tokens_user_id` (`user_id`),
   INDEX `idx_revoked_tokens_token_hash` (`token_hash`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ===============================
+-- REFRESH TOKENS TABLE
+-- ===============================
+CREATE TABLE IF NOT EXISTS `refresh_tokens` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `user_id` BIGINT NOT NULL,
+  `token_hash` VARCHAR(64) NOT NULL UNIQUE,
+  `expiry_date` DATETIME NOT NULL,
+  `revoked` BOOLEAN DEFAULT FALSE,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_refresh_token_hash` (`token_hash`),
+  INDEX `idx_refresh_user_id` (`user_id`),
+  CONSTRAINT `fk_refresh_user` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ===============================

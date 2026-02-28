@@ -14,6 +14,7 @@ import com.growearn.repository.CreatorStatsRepository;
 // legacy viewer tasks removed; new flow uses tasks + viewer_tasks entities
 import com.growearn.entity.CreatorStats;
 import com.growearn.security.JwtUtil;
+import com.growearn.security.TokenBlacklistService;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -23,14 +24,29 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 import com.growearn.dto.AuthResponseDTO;
+import com.growearn.dto.LoginRequest;
+import com.growearn.dto.LogoutRequest;
+import com.growearn.dto.SignupRequest;
 import java.util.List;
 import com.growearn.entity.Campaign;
 import java.util.Optional;
 
 import jakarta.validation.ConstraintViolationException;
+import jakarta.validation.Valid;
+import org.springframework.validation.annotation.Validated;
+
+import com.growearn.service.RefreshTokenService;
+
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
+import jakarta.servlet.http.Cookie;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.ResponseCookie;
 
 @RestController
 @RequestMapping("/api/auth")
+@Validated
 
 public class AuthController {
 
@@ -41,8 +57,25 @@ public class AuthController {
         private final CampaignRepository campaignRepo;
         private final DeviceRegistryRepository deviceRegistryRepo;
         private final LoginAuditRepository loginAuditRepo;
+        private final RefreshTokenService refreshTokenService;
+        private final TokenBlacklistService tokenBlacklistService;
         private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(AuthController.class);
         private final jakarta.persistence.EntityManager entityManager;
+
+        @Value("${security.refresh-cookie.name:refresh_token}")
+        private String refreshCookieName;
+
+        @Value("${security.refresh-cookie.secure:false}")
+        private boolean refreshCookieSecure;
+
+        @Value("${security.refresh-cookie.same-site:Lax}")
+        private String refreshCookieSameSite;
+
+        @Value("${security.refresh-cookie.path:/}")
+        private String refreshCookiePath;
+
+        @Value("${jwt.refresh.expiration-days:7}")
+        private long refreshCookieDays;
 
                 public AuthController(
                     UserRepository userRepo,
@@ -52,6 +85,8 @@ public class AuthController {
                     CampaignRepository campaignRepo,
                     DeviceRegistryRepository deviceRegistryRepo,
                     LoginAuditRepository loginAuditRepo,
+                    RefreshTokenService refreshTokenService,
+                    TokenBlacklistService tokenBlacklistService,
                     jakarta.persistence.EntityManager entityManager
                 ) {
                     this.userRepo = userRepo;
@@ -61,6 +96,8 @@ public class AuthController {
                     this.campaignRepo = campaignRepo;
                     this.deviceRegistryRepo = deviceRegistryRepo;
                     this.loginAuditRepo = loginAuditRepo;
+                    this.refreshTokenService = refreshTokenService;
+                    this.tokenBlacklistService = tokenBlacklistService;
                     this.entityManager = entityManager;
                 }
 
@@ -71,7 +108,7 @@ public class AuthController {
         String email = req.get("email");
         String roleStr = req.get("role");
 
-        Role role = Role.valueOf(roleStr.toUpperCase());
+        Role role = Role.valueOf(normalizeRole(roleStr));
 
         boolean exists =
                 userRepo.findByEmailAndRole(email, role).isPresent();
@@ -82,10 +119,10 @@ public class AuthController {
     // ✅ SIGNUP
     @PostMapping("/signup")
     @Transactional
-    public ResponseEntity<?> signup(@RequestBody Map<String, String> req, @RequestHeader(value = "X-Device-Fingerprint", required = false) String deviceFingerprint, HttpServletRequest request) {
-        String email = req.get("email");
-        String password = req.get("password");
-        Role role = Role.valueOf(req.get("role").toUpperCase());
+    public ResponseEntity<?> signup(@Valid @RequestBody SignupRequest req, @RequestHeader(value = "X-Device-Fingerprint", required = false) String deviceFingerprint, HttpServletRequest request) {
+        String email = req.getEmail();
+        String password = req.getPassword();
+        Role role = Role.valueOf(normalizeRole(req.getRole()));
         Role dbRole = (role == Role.VIEWER) ? Role.USER : role;
         String clientIp = getClientIp(request);
         String userAgent = request.getHeader("User-Agent");
@@ -180,23 +217,34 @@ public class AuthController {
             creatorStatsRepo.findByCreatorId(fetchedUser.getId()).orElseGet(() -> creatorStatsRepo.save(new CreatorStats(fetchedUser.getId())));
         }
 
-        String token = jwtUtil.generateToken(fetchedUser.getId(), fetchedUser.getRole().name());
-        return ResponseEntity.ok(new AuthResponseDTO(token, fetchedUser.getRole().name()));
+        String accessToken = jwtUtil.generateAccessToken(fetchedUser.getId(), fetchedUser.getRole().name());
+        String refreshToken = refreshTokenService.createRefreshToken(fetchedUser);
+        ResponseCookie cookie = buildRefreshCookie(refreshToken);
+        return ResponseEntity.ok()
+            .header("Set-Cookie", cookie.toString())
+            .body(new AuthResponseDTO(accessToken, null, fetchedUser.getRole().name()));
+    }
+
+    // ✅ REGISTER (alias)
+    @PostMapping("/register")
+    @Transactional
+    public ResponseEntity<?> register(@Valid @RequestBody SignupRequest req, @RequestHeader(value = "X-Device-Fingerprint", required = false) String deviceFingerprint, HttpServletRequest request) {
+        return signup(req, deviceFingerprint, request);
     }
 
     // ✅ LOGIN
     @PostMapping("/login")
     @Transactional
-    public ResponseEntity<?> login(@RequestBody Map<String, String> req, @RequestHeader(value = "X-Device-Fingerprint", required = false) String deviceFingerprint, HttpServletRequest request) {
-        String email = req.get("email");
-        String password = req.get("password");
-        String roleStr = req.get("role");
+    public ResponseEntity<?> login(@Valid @RequestBody LoginRequest req, @RequestHeader(value = "X-Device-Fingerprint", required = false) String deviceFingerprint, HttpServletRequest request) {
+        String email = req.getEmail();
+        String password = req.getPassword();
+        String roleStr = req.getRole();
         if (roleStr == null) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", "Role is required"));
         }
         Role role;
         try {
-            role = Role.valueOf(roleStr.toUpperCase());
+            role = Role.valueOf(normalizeRole(roleStr));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", "Invalid role"));
         }
@@ -211,6 +259,11 @@ public class AuthController {
         }
         if (user == null) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "User not found"));
+        }
+
+        if (user.isAccountLocked()) {
+            logger.warn("login_locked userId={} email={} lockedUntil={}", user.getId(), email, user.getAccountLockedUntil());
+            return ResponseEntity.status(HttpStatus.LOCKED).body(Map.of("message", "Account locked. Try again later."));
         }
 
         // Device enforcement: allow updating device fingerprint if mismatched
@@ -229,8 +282,21 @@ public class AuthController {
 
         if (user == null || !passwordEncoder.matches(password, user.getPassword())) {
             logLoginAudit(null, clientIp, deviceFingerprint, userAgent, "FAILED: Invalid credentials");
+            int failed = user != null ? user.getFailedAttempts() + 1 : 0;
+            if (user != null) {
+                user.setFailedAttempts(failed);
+                if (failed >= 5) {
+                    user.setAccountLockedUntil(LocalDateTime.now().plusMinutes(15));
+                    user.setFailedAttempts(0);
+                    logger.warn("login_lock userId={} email={}", user.getId(), email);
+                }
+                userRepo.save(user);
+            }
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("message", "Invalid credentials or role"));
         }
+
+        user.setFailedAttempts(0);
+        user.setAccountLockedUntil(null);
 
         // Check account status before allowing login
         if (user.getStatus() != null) {
@@ -270,8 +336,73 @@ public class AuthController {
         // Log audit
         logLoginAudit(user, clientIp, deviceFingerprint, userAgent, "LOGIN");
 
-        String token = jwtUtil.generateToken(user.getId(), user.getRole().name());
-        return ResponseEntity.ok(new AuthResponseDTO(token, user.getRole().name()));
+        String accessToken = jwtUtil.generateAccessToken(user.getId(), user.getRole().name());
+        String refreshToken = refreshTokenService.createRefreshToken(user);
+        ResponseCookie cookie = buildRefreshCookie(refreshToken);
+        return ResponseEntity.ok()
+            .header("Set-Cookie", cookie.toString())
+            .body(new AuthResponseDTO(accessToken, null, user.getRole().name()));
+    }
+
+    // ✅ REFRESH TOKEN
+    @PostMapping("/refresh")
+    public ResponseEntity<?> refresh(HttpServletRequest request) {
+        String raw = readCookie(request, refreshCookieName);
+        if (raw == null || raw.isBlank()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("message", "Missing refresh token"));
+        }
+        var rotated = refreshTokenService.rotate(raw);
+        if (rotated.isEmpty()) {
+            logger.warn("refresh_reuse_attempt token={}", raw.substring(0, Math.min(10, raw.length())));
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("message", "Invalid refresh token"));
+        }
+        Long userId = rotated.get().getUserId();
+        User user = userRepo.findById(userId).orElse(null);
+        if (user == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("message", "User not found"));
+        }
+        String accessToken = jwtUtil.generateAccessToken(user.getId(), user.getRole().name());
+        String newRefresh = refreshTokenService.createRefreshToken(user);
+        ResponseCookie cookie = buildRefreshCookie(newRefresh);
+        return ResponseEntity.ok()
+            .header("Set-Cookie", cookie.toString())
+            .body(new AuthResponseDTO(accessToken, null, user.getRole().name()));
+    }
+
+    // ✅ LOGOUT
+    @PostMapping("/logout")
+    public ResponseEntity<?> logout(@RequestHeader(value = "Authorization", required = false) String authHeader,
+                                    @RequestBody(required = false) LogoutRequest req,
+                                    HttpServletRequest request) {
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            String token = authHeader.substring(7);
+            try {
+                var exp = jwtUtil.getExpiration(token);
+                long seconds = ChronoUnit.SECONDS.between(LocalDateTime.now(), exp.toInstant().atZone(java.time.ZoneId.systemDefault()).toLocalDateTime());
+                if (seconds < 0) seconds = 0;
+                tokenBlacklistService.blacklist(token, Duration.ofSeconds(seconds));
+            } catch (Exception ex) {
+                logger.warn("logout_blacklist_failed {}", ex.getMessage());
+            }
+        }
+        if (req != null && req.getRefreshToken() != null && !req.getRefreshToken().isBlank()) {
+            refreshTokenService.revoke(req.getRefreshToken());
+        } else {
+            String raw = readCookie(request, refreshCookieName);
+            if (raw != null && !raw.isBlank()) {
+                refreshTokenService.revoke(raw);
+            }
+        }
+        ResponseCookie clear = ResponseCookie.from(refreshCookieName, "")
+            .httpOnly(true)
+            .secure(refreshCookieSecure)
+            .path(refreshCookiePath)
+            .sameSite(refreshCookieSameSite)
+            .maxAge(0)
+            .build();
+        return ResponseEntity.ok()
+            .header("Set-Cookie", clear.toString())
+            .body(Map.of("success", true));
     }
 
     private String getClientIp(HttpServletRequest request) {
@@ -290,9 +421,33 @@ public class AuthController {
         User tempUser = audit.getUser();
         audit.setUser(null);
         loginAuditRepo.save(audit);
-        // Optionally: log structured JSON
-        System.out.println(String.format("{\"event\":\"login_audit\",\"userId\":%s,\"ip\":\"%s\",\"device\":\"%s\",\"action\":\"%s\"}", tempUser != null ? tempUser.getId() : null, ip, deviceFingerprint, action));
-        // Optionally: log structured JSON
-        System.out.println(String.format("{\"event\":\"login_audit\",\"userId\":%s,\"ip\":\"%s\",\"device\":\"%s\",\"action\":\"%s\"}", user != null ? user.getId() : null, ip, deviceFingerprint, action));
+        logger.info("login_audit userId={} ip={} device={} action={}", tempUser != null ? tempUser.getId() : null, ip, deviceFingerprint, action);
+        logger.info("login_audit userId={} ip={} device={} action={}", user != null ? user.getId() : null, ip, deviceFingerprint, action);
+    }
+
+    private ResponseCookie buildRefreshCookie(String refreshToken) {
+        return ResponseCookie.from(refreshCookieName, refreshToken)
+            .httpOnly(true)
+            .secure(refreshCookieSecure)
+            .path(refreshCookiePath)
+            .sameSite(refreshCookieSameSite)
+            .maxAge(Duration.ofDays(refreshCookieDays))
+            .build();
+    }
+
+    private String readCookie(HttpServletRequest request, String name) {
+        Cookie[] cookies = request.getCookies();
+        if (cookies == null) return null;
+        for (Cookie c : cookies) {
+            if (name.equals(c.getName())) {
+                return c.getValue();
+            }
+        }
+        return null;
+    }
+
+    private String normalizeRole(String roleStr) {
+        if (roleStr == null) return null;
+        return roleStr.toUpperCase().replaceFirst("^ROLE_", "");
     }
 }

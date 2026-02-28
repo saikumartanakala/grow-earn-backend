@@ -129,6 +129,17 @@ public class CreatorTopupController {
     }
 
     /**
+     * Alias: GET /api/creator/topups
+     */
+    @GetMapping("/topups")
+    public ResponseEntity<?> getTopupsAlias(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            HttpServletRequest request) {
+        return getTopupHistory(page, size, request);
+    }
+
+    /**
      * Extract user ID from JWT token
      */
     private Long extractUserId(HttpServletRequest request) {

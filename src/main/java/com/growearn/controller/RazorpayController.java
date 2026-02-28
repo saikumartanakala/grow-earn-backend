@@ -1,7 +1,10 @@
 package com.growearn.controller;
 
 import com.growearn.entity.PaymentTransaction;
+import com.growearn.entity.CreatorTopup;
+import com.growearn.entity.TopupStatus;
 import com.growearn.repository.PaymentTransactionRepository;
+import com.growearn.repository.CreatorTopupRepository;
 import com.growearn.security.JwtUtil;
 import com.growearn.service.RazorpayService;
 import com.growearn.service.WalletService;
@@ -19,25 +22,29 @@ import java.util.Map;
 import java.util.Optional;
 
 @RestController
-@RequestMapping("/payments")
+@RequestMapping("/api/payments")
 public class RazorpayController {
 
     private static final Logger logger = LoggerFactory.getLogger(RazorpayController.class);
 
     private final RazorpayService razorpayService;
     private final PaymentTransactionRepository paymentTransactionRepository;
+    private final CreatorTopupRepository creatorTopupRepository;
     private final WalletService walletService;
     private final JwtUtil jwtUtil;
 
     @Value("${razorpay.key}")
     private String razorpayKey;
 
+
     public RazorpayController(RazorpayService razorpayService,
                               PaymentTransactionRepository paymentTransactionRepository,
+                              CreatorTopupRepository creatorTopupRepository,
                               WalletService walletService,
                               JwtUtil jwtUtil) {
         this.razorpayService = razorpayService;
         this.paymentTransactionRepository = paymentTransactionRepository;
+        this.creatorTopupRepository = creatorTopupRepository;
         this.walletService = walletService;
         this.jwtUtil = jwtUtil;
     }
@@ -120,7 +127,8 @@ public class RazorpayController {
             }
             PaymentTransaction tx = txOpt.get();
             if (Boolean.TRUE.equals(tx.getCredited())) {
-                return ResponseEntity.ok(Map.of("success", true, "message", "Already credited"));
+                Object wallet = walletService.getWalletSnapshot(tx.getUserId(), tx.getUserRole());
+                return ResponseEntity.ok(Map.of("success", true, "message", "Already credited", "wallet", wallet));
             }
 
             boolean valid = razorpayService.verifySignature(orderId, paymentId, signature);
@@ -138,19 +146,48 @@ public class RazorpayController {
             walletService.creditBalance(tx.getUserId(), tx.getAmount(), tx.getUserRole());
             tx.setCredited(true);
             tx.setCreditedAt(LocalDateTime.now());
+            tx.setStatus("PAID");
             paymentTransactionRepository.save(tx);
 
             Object wallet = walletService.getWalletSnapshot(tx.getUserId(), tx.getUserRole());
-
-            return ResponseEntity.ok(Map.of(
-                "verified", true,
-                "message", "Payment verified",
-                "wallet", wallet
-            ));
+            Map<String, Object> response = new java.util.HashMap<>();
+            response.put("verified", true);
+            response.put("message", "Payment verified");
+            response.put("wallet", wallet);
+            Map<String, Object> topup = createCreatorTopupIfNeeded(tx, paymentId, orderId);
+            if (topup != null) {
+                response.put("topup", topup);
+            }
+            return ResponseEntity.ok(response);
         } catch (Exception e) {
             logger.error("Error verifying payment", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Map.of("error", "Failed to verify payment"));
         }
+    }
+
+
+    private Map<String, Object> createCreatorTopupIfNeeded(PaymentTransaction tx, String paymentId, String orderId) {
+        String role = tx.getUserRole() != null ? tx.getUserRole().toUpperCase() : "";
+        if (!role.contains("CREATOR")) {
+            return null;
+        }
+        CreatorTopup topup = new CreatorTopup();
+        topup.setCreatorId(tx.getUserId());
+        topup.setAmount(tx.getAmount());
+        topup.setUpiReference("razorpay:" + paymentId);
+        topup.setStatus(TopupStatus.APPROVED);
+        topup.setApprovedAt(LocalDateTime.now());
+        topup.setApprovedBy(null);
+        CreatorTopup saved = creatorTopupRepository.save(topup);
+        return Map.of(
+            "id", saved.getId(),
+            "amount", saved.getAmount(),
+            "status", saved.getStatus().name(),
+            "upiReference", saved.getUpiReference(),
+            "orderId", orderId,
+            "createdAt", saved.getCreatedAt(),
+            "approvedAt", saved.getApprovedAt()
+        );
     }
 }

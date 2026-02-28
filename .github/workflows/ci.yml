@@ -1,0 +1,35 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ "all-platforms" ]
+  pull_request:
+    branches: [ "all-platforms" ]
+
+jobs:
+  build:
+    name: Build and Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+          cache: "maven"
+
+      - name: Build and Test (Unix)
+        if: runner.os != 'Windows'
+        run: ./mvnw -q verify
+
+      - name: Build and Test (Windows)
+        if: runner.os == 'Windows'
+        run: .\mvnw.cmd -q verify

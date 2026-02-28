@@ -40,6 +40,12 @@ public class User {
     @Column(name = "suspension_until")
     private LocalDateTime suspensionUntil;
 
+    @Column(name = "failed_attempts")
+    private Integer failedAttempts = 0;
+
+    @Column(name = "account_locked_until")
+    private LocalDateTime accountLockedUntil;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
@@ -94,6 +100,8 @@ public class User {
     public AccountStatus getStatus() { return status != null ? status : AccountStatus.ACTIVE; }
     public Boolean getIsVerified() { return isVerified != null ? isVerified : false; }
     public LocalDateTime getSuspensionUntil() { return suspensionUntil; }
+    public Integer getFailedAttempts() { return failedAttempts != null ? failedAttempts : 0; }
+    public LocalDateTime getAccountLockedUntil() { return accountLockedUntil; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public String getFullName() { return fullName; }
@@ -126,6 +134,14 @@ public class User {
     }
     public void setSuspensionUntil(LocalDateTime suspensionUntil) { 
         this.suspensionUntil = suspensionUntil; 
+        this.updatedAt = LocalDateTime.now();
+    }
+    public void setFailedAttempts(Integer failedAttempts) {
+        this.failedAttempts = failedAttempts;
+        this.updatedAt = LocalDateTime.now();
+    }
+    public void setAccountLockedUntil(LocalDateTime accountLockedUntil) {
+        this.accountLockedUntil = accountLockedUntil;
         this.updatedAt = LocalDateTime.now();
     }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
@@ -178,5 +194,9 @@ public class User {
 
     public boolean isBanned() {
         return status == AccountStatus.BANNED;
+    }
+
+    public boolean isAccountLocked() {
+        return accountLockedUntil != null && LocalDateTime.now().isBefore(accountLockedUntil);
     }
 }
