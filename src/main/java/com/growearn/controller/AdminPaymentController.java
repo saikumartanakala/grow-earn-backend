@@ -7,6 +7,7 @@ import com.growearn.entity.TopupStatus;
 import com.growearn.entity.WithdrawalStatus;
 import com.growearn.security.JwtUtil;
 import com.growearn.service.CreatorTopupService;
+import com.growearn.service.RazorpayXService;
 import com.growearn.service.WithdrawalService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
@@ -25,21 +26,23 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/admin")
-@CrossOrigin(origins = {"http://localhost:5173", "http://192.168.55.104:5173"}, allowCredentials = "true")
 public class AdminPaymentController {
 
     private static final Logger logger = LoggerFactory.getLogger(AdminPaymentController.class);
 
     private final WithdrawalService withdrawalService;
     private final CreatorTopupService creatorTopupService;
+    private final RazorpayXService razorpayXService;
     private final JwtUtil jwtUtil;
 
     public AdminPaymentController(
             WithdrawalService withdrawalService,
             CreatorTopupService creatorTopupService,
+            RazorpayXService razorpayXService,
             JwtUtil jwtUtil) {
         this.withdrawalService = withdrawalService;
         this.creatorTopupService = creatorTopupService;
+        this.razorpayXService = razorpayXService;
         this.jwtUtil = jwtUtil;
     }
 
@@ -125,6 +128,44 @@ public class AdminPaymentController {
             logger.error("Error approving withdrawal", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Map.of("error", "Failed to approve withdrawal"));
+        }
+    }
+
+    /**
+     * Approve withdrawal payout via RazorpayX
+     * POST /api/admin/payout/{withdrawalId}/approve
+     */
+    @PostMapping("/payout/{withdrawalId}/approve")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Map<String, Object>> approvePayout(
+            @PathVariable Long withdrawalId,
+            HttpServletRequest request) {
+        try {
+            Long adminId = extractUserId(request);
+            var withdrawal = withdrawalService.preparePayout(withdrawalId, adminId);
+            var payout = razorpayXService.createPayout(withdrawal, adminId);
+
+            logger.info("Admin {} initiated payout for withdrawal {}", adminId, withdrawalId);
+
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "Payout initiated",
+                "payout", Map.of(
+                    "id", payout.getId(),
+                    "payoutId", payout.getRazorpayPayoutId(),
+                    "withdrawalId", payout.getWithdrawalId(),
+                    "status", payout.getStatus(),
+                    "amount", payout.getAmount()
+                )
+            ));
+        } catch (RuntimeException e) {
+            logger.error("Error initiating payout", e);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            logger.error("Error initiating payout", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("error", "Failed to initiate payout"));
         }
     }
 

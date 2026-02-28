@@ -19,6 +19,7 @@ public class WithdrawalResponseDTO {
     private String processedByEmail;
     private String rejectionReason;
     private String reason;
+    private String payoutStatus;
 
     // Constructors
     public WithdrawalResponseDTO() {
@@ -138,5 +139,13 @@ public class WithdrawalResponseDTO {
     public void setReason(String reason) {
         this.reason = reason;
         this.rejectionReason = reason;
+    }
+
+    public String getPayoutStatus() {
+        return payoutStatus;
+    }
+
+    public void setPayoutStatus(String payoutStatus) {
+        this.payoutStatus = payoutStatus;
     }
 }

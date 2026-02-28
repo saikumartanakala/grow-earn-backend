@@ -26,7 +26,6 @@ import org.springframework.data.domain.PageRequest;
 
 @RestController
 @RequestMapping("/api/admin/users")
-@CrossOrigin(origins = {"http://localhost:5173", "http://192.168.55.104:5173"}, allowCredentials = "true")
 @PreAuthorize("hasRole('ADMIN')")
 public class AdminUserController {
 

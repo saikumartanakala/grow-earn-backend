@@ -6,6 +6,8 @@ public class TaskSubmissionRequest {
     private String proofPublicId;
     private String proofText;
     private String deviceFingerprint;
+    private String proofMimeType;
+    private Long proofSizeBytes;
 
     public TaskSubmissionRequest() {}
 
@@ -31,4 +33,10 @@ public class TaskSubmissionRequest {
     
     public String getDeviceFingerprint() { return deviceFingerprint; }
     public void setDeviceFingerprint(String deviceFingerprint) { this.deviceFingerprint = deviceFingerprint; }
+
+    public String getProofMimeType() { return proofMimeType; }
+    public void setProofMimeType(String proofMimeType) { this.proofMimeType = proofMimeType; }
+
+    public Long getProofSizeBytes() { return proofSizeBytes; }
+    public void setProofSizeBytes(Long proofSizeBytes) { this.proofSizeBytes = proofSizeBytes; }
 }

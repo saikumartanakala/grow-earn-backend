@@ -28,7 +28,6 @@ import org.springframework.security.core.context.SecurityContextHolder;
 
 @RestController
 @RequestMapping({"/api/creator/campaign", "/api/creator/campaigns"})
-@CrossOrigin(origins = {"http://localhost:5173", "http://192.168.55.104:5173"}, allowCredentials = "true")
 public class CampaignController {
 
     private final CampaignService campaignService;

@@ -23,7 +23,6 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/creator")
-@CrossOrigin(origins = {"http://localhost:5173", "http://192.168.55.104:5173"}, allowCredentials = "true")
 public class CreatorTopupController {
 
     private static final Logger logger = LoggerFactory.getLogger(CreatorTopupController.class);

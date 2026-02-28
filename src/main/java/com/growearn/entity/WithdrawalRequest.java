@@ -157,6 +157,23 @@ public class WithdrawalRequest {
         this.processedAt = LocalDateTime.now();
     }
 
+    public void markProcessing(Long adminId) {
+        this.status = WithdrawalStatus.PROCESSING;
+        this.processedBy = adminId;
+        this.processedAt = LocalDateTime.now();
+    }
+
+    public void markPaid() {
+        this.status = WithdrawalStatus.PAID;
+        this.processedAt = LocalDateTime.now();
+    }
+
+    public void markFailed(String reason) {
+        this.status = WithdrawalStatus.FAILED;
+        this.processedAt = LocalDateTime.now();
+        this.rejectionReason = reason;
+    }
+
     public void reject(Long adminId, String reason) {
         this.status = WithdrawalStatus.REJECTED;
         this.processedBy = adminId;

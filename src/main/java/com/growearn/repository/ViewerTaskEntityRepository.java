@@ -1,6 +1,8 @@
 package com.growearn.repository;
 
 import com.growearn.entity.ViewerTaskEntity;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.repository.Modifying;
@@ -10,6 +12,7 @@ import java.util.List;
 
 public interface ViewerTaskEntityRepository extends JpaRepository<ViewerTaskEntity, Long> {
     List<ViewerTaskEntity> findByStatus(String status);
+    Page<ViewerTaskEntity> findByStatus(String status, Pageable pageable);
     
     // Find tasks by status ordered by submitted date DESC (newest first)
     List<ViewerTaskEntity> findByStatusOrderBySubmittedAtDesc(String status);

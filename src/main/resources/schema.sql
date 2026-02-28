@@ -141,6 +141,19 @@ CREATE TABLE IF NOT EXISTS `viewer_tasks` (
   `target_url` VARCHAR(500),
   `status` VARCHAR(32) DEFAULT 'ASSIGNED',
   `proof` TEXT,
+  `proof_url` VARCHAR(500),
+  `proof_public_id` VARCHAR(255),
+  `proof_text` TEXT,
+  `proof_hash` VARCHAR(64),
+  `risk_score` DOUBLE DEFAULT 0.0,
+  `auto_flag` BOOLEAN DEFAULT FALSE,
+  `approved_at` TIMESTAMP NULL,
+  `hold_start_time` TIMESTAMP NULL,
+  `hold_end_time` TIMESTAMP NULL,
+  `paid_at` TIMESTAMP NULL,
+  `payment_txn_id` VARCHAR(100),
+  `device_fingerprint` VARCHAR(255),
+  `ip_address` VARCHAR(100),
   `assigned_at` TIMESTAMP NULL,
   `submitted_at` TIMESTAMP NULL,
   `completed_at` TIMESTAMP NULL,
@@ -152,40 +165,12 @@ CREATE TABLE IF NOT EXISTS `viewer_tasks` (
   INDEX `idx_viewer_tasks_task_id` (`task_id`),
   INDEX `idx_viewer_tasks_platform` (`platform`),
   INDEX `idx_viewer_tasks_task_type` (`task_type`),
+  INDEX `idx_viewer_tasks_proof_hash` (`proof_hash`),
+  INDEX `idx_viewer_tasks_hold_end` (`hold_end_time`),
+  INDEX `idx_viewer_tasks_paid_at` (`paid_at`),
+  INDEX `idx_viewer_tasks_risk` (`risk_score`, `auto_flag`),
   CONSTRAINT `fk_viewer_tasks_task` FOREIGN KEY (`task_id`) REFERENCES `tasks`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- ===============================
--- EXTEND VIEWER_TASKS FOR VERIFICATION PIPELINE
--- ===============================
--- Add new fields for proof handling and verification
-ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `proof_url` VARCHAR(500);
-ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `proof_public_id` VARCHAR(255);
-ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `proof_text` TEXT;
-ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `proof_hash` VARCHAR(64);
-
--- Add risk analysis fields
-ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `risk_score` DOUBLE DEFAULT 0.0;
-ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `auto_flag` BOOLEAN DEFAULT FALSE;
-
--- Add hold period fields
-ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `approved_at` TIMESTAMP NULL;
-ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `hold_start_time` TIMESTAMP NULL;
-ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `hold_end_time` TIMESTAMP NULL;
-
--- Add payment tracking fields
-ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `paid_at` TIMESTAMP NULL;
-ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `payment_txn_id` VARCHAR(100);
-
--- Add device and IP tracking
-ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `device_fingerprint` VARCHAR(255);
-ALTER TABLE `viewer_tasks` ADD COLUMN IF NOT EXISTS `ip_address` VARCHAR(100);
-
--- Add indexes for verification queries
-CREATE INDEX IF NOT EXISTS `idx_viewer_tasks_proof_hash` ON `viewer_tasks`(`proof_hash`);
-CREATE INDEX IF NOT EXISTS `idx_viewer_tasks_hold_end` ON `viewer_tasks`(`hold_end_time`);
-CREATE INDEX IF NOT EXISTS `idx_viewer_tasks_paid_at` ON `viewer_tasks`(`paid_at`);
-CREATE INDEX IF NOT EXISTS `idx_viewer_tasks_risk` ON `viewer_tasks`(`risk_score`, `auto_flag`);
 
 CREATE TABLE IF NOT EXISTS `wallet` (
   `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -209,7 +194,7 @@ CREATE TABLE IF NOT EXISTS `earnings` (
 -- INSERT IGNORE INTO users (email, password, role) VALUES ('admin@growearn.com', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZRGdjGj/n3.H8BjZL1GJoI1n1ADmO', 'ADMIN');
 
 -- Insert test viewer users with default passwords
-INSERT INTO users (email, password, role, status, is_verified, suspension_until) 
+INSERT IGNORE INTO users (email, password, role, status, is_verified, suspension_until)
 VALUES ('viewer1@example.com', 'defaultPassword123', 'VIEWER', 'ACTIVE', true, NULL),
        ('viewer2@example.com', 'defaultPassword123', 'VIEWER', 'ACTIVE', false, NULL);
 
@@ -241,7 +226,7 @@ CREATE TABLE IF NOT EXISTS `withdrawal_requests` (
   `user_id` BIGINT NOT NULL,
   `amount` DECIMAL(10, 2) NOT NULL,
   `upi_id` VARCHAR(100) NOT NULL,
-  `status` ENUM('PENDING', 'APPROVED', 'PAID', 'REJECTED') DEFAULT 'PENDING',
+  `status` ENUM('PENDING', 'PROCESSING', 'APPROVED', 'PAID', 'FAILED', 'REJECTED') DEFAULT 'PENDING',
   `requested_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `processed_at` TIMESTAMP NULL,
   `processed_by` BIGINT NULL,
@@ -251,6 +236,10 @@ CREATE TABLE IF NOT EXISTS `withdrawal_requests` (
   CONSTRAINT `fk_withdrawal_requests_user` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_withdrawal_requests_processor` FOREIGN KEY (`processed_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- If the table already exists with older enum values, run this alter:
+-- ALTER TABLE `withdrawal_requests`
+--   MODIFY COLUMN `status` ENUM('PENDING', 'PROCESSING', 'APPROVED', 'PAID', 'FAILED', 'REJECTED') DEFAULT 'PENDING';
 
 -- Creator Top-ups: Creator fund additions requiring admin approval
 CREATE TABLE IF NOT EXISTS `creator_topups` (
@@ -268,4 +257,43 @@ CREATE TABLE IF NOT EXISTS `creator_topups` (
   INDEX `idx_creator_topups_status` (`status`),
   CONSTRAINT `fk_creator_topups_creator` FOREIGN KEY (`creator_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_creator_topups_approver` FOREIGN KEY (`approved_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ===============================
+-- RAZORPAY TRANSACTIONS
+-- ===============================
+
+CREATE TABLE IF NOT EXISTS `payment_transactions` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `user_id` BIGINT NOT NULL,
+  `user_role` VARCHAR(30),
+  `amount` DECIMAL(12, 2) NOT NULL,
+  `currency` VARCHAR(10) DEFAULT 'INR',
+  `razorpay_order_id` VARCHAR(100) UNIQUE,
+  `razorpay_payment_id` VARCHAR(100),
+  `status` VARCHAR(30),
+  `signature` VARCHAR(200),
+  `credited` BOOLEAN DEFAULT FALSE,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `verified_at` TIMESTAMP NULL,
+  `credited_at` TIMESTAMP NULL,
+  INDEX `idx_payment_transactions_user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `payout_transactions` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `withdrawal_id` BIGINT NOT NULL,
+  `user_id` BIGINT NOT NULL,
+  `amount` DECIMAL(12, 2) NOT NULL,
+  `currency` VARCHAR(10) DEFAULT 'INR',
+  `mode` VARCHAR(20) DEFAULT 'UPI',
+  `purpose` VARCHAR(50) DEFAULT 'payout',
+  `fund_account` VARCHAR(150),
+  `razorpay_payout_id` VARCHAR(100) UNIQUE,
+  `status` VARCHAR(30),
+  `failure_reason` TEXT,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `processed_at` TIMESTAMP NULL,
+  INDEX `idx_payout_transactions_withdrawal_id` (`withdrawal_id`),
+  INDEX `idx_payout_transactions_user_id` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

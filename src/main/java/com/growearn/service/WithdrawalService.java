@@ -5,6 +5,7 @@ import com.growearn.dto.WithdrawalResponseDTO;
 import com.growearn.entity.User;
 import com.growearn.entity.WithdrawalRequest;
 import com.growearn.entity.WithdrawalStatus;
+import com.growearn.repository.PayoutTransactionRepository;
 import com.growearn.repository.UserRepository;
 import com.growearn.repository.WithdrawalRequestRepository;
 import org.slf4j.Logger;
@@ -28,16 +29,19 @@ public class WithdrawalService {
     private final ViewerWalletService viewerWalletService;
     private final UserRepository userRepository;
     private final UserViolationService userViolationService;
+    private final PayoutTransactionRepository payoutTransactionRepository;
 
     public WithdrawalService(
             WithdrawalRequestRepository withdrawalRequestRepository,
             ViewerWalletService viewerWalletService,
             UserRepository userRepository,
-            UserViolationService userViolationService) {
+            UserViolationService userViolationService,
+            PayoutTransactionRepository payoutTransactionRepository) {
         this.withdrawalRequestRepository = withdrawalRequestRepository;
         this.viewerWalletService = viewerWalletService;
         this.userRepository = userRepository;
         this.userViolationService = userViolationService;
+        this.payoutTransactionRepository = payoutTransactionRepository;
     }
 
     /**
@@ -170,6 +174,27 @@ public class WithdrawalService {
     }
 
     /**
+     * Prepare withdrawal for RazorpayX payout (admin)
+     */
+    @Transactional
+    public WithdrawalRequest preparePayout(Long requestId, Long adminId) {
+        WithdrawalRequest request = withdrawalRequestRepository.findById(requestId)
+            .orElseThrow(() -> new RuntimeException("Withdrawal request not found"));
+
+        if (!request.isPending()) {
+            throw new RuntimeException("Withdrawal request is not pending");
+        }
+
+        if (!viewerWalletService.hasSufficientBalance(request.getUserId(), request.getAmount())) {
+            throw new RuntimeException("User has insufficient balance for this withdrawal");
+        }
+
+        viewerWalletService.deductBalance(request.getUserId(), request.getAmount());
+        request.markProcessing(adminId);
+        return withdrawalRequestRepository.save(request);
+    }
+
+    /**
      * Map entity to DTO
      */
     private WithdrawalResponseDTO mapToResponseDTO(WithdrawalRequest request) {
@@ -186,6 +211,16 @@ public class WithdrawalService {
         dto.setRejectionReason(request.getRejectionReason());
         dto.setReason(request.getRejectionReason());
 
+        String payoutStatus = payoutTransactionRepository.findByWithdrawalId(request.getId())
+            .map(payout -> normalizePayoutStatus(payout.getStatus()))
+            .orElseGet(() -> {
+                if (request.getStatus() == WithdrawalStatus.PROCESSING) return "PROCESSING";
+                if (request.getStatus() == WithdrawalStatus.FAILED) return "FAILED";
+                if (request.getStatus() == WithdrawalStatus.PAID) return "SUCCESS";
+                return "PENDING";
+            });
+        dto.setPayoutStatus(payoutStatus);
+
         // Set user email and userName
         if (request.getUser() != null) {
             dto.setUserEmail(request.getUser().getEmail());
@@ -198,5 +233,15 @@ public class WithdrawalService {
         }
 
         return dto;
+    }
+
+    private String normalizePayoutStatus(String status) {
+        if (status == null) return "PENDING";
+        String normalized = status.trim().toUpperCase();
+        if ("PROCESSED".equals(normalized)) return "SUCCESS";
+        if ("PROCESSING".equals(normalized)) return "PROCESSING";
+        if ("FAILED".equals(normalized)) return "FAILED";
+        if ("SUCCESS".equals(normalized)) return "SUCCESS";
+        return normalized;
     }
 }

@@ -13,7 +13,6 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/admin/violations")
-@CrossOrigin(origins = {"http://localhost:5173", "http://192.168.55.104:5173"}, allowCredentials = "true")
 public class AdminViolationController {
 
     private static final Logger logger = LoggerFactory.getLogger(AdminViolationController.class);

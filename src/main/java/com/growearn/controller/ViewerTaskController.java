@@ -9,6 +9,7 @@ import com.growearn.security.JwtUtil;
 import com.growearn.repository.TaskRepository;
 import com.growearn.repository.ViewerTaskEntityRepository;
 import com.growearn.repository.EarningRepository;
+import com.growearn.service.CloudinaryUploadValidator;
 import com.growearn.service.ViewerWalletService;
 import com.growearn.entity.TaskEntity;
 import org.slf4j.Logger;
@@ -21,7 +22,6 @@ import java.util.HashMap;
 
 @RestController
 @RequestMapping("/api/viewer/tasks")
-@CrossOrigin(origins = {"http://localhost:5173", "http://192.168.55.104:5173"}, allowCredentials = "true")
 public class ViewerTaskController {
 
     private static final Logger logger = LoggerFactory.getLogger(ViewerTaskController.class);
@@ -34,12 +34,14 @@ public class ViewerTaskController {
     private final EarningRepository earningRepository;
     private final ViewerWalletService viewerWalletService;
     private final com.growearn.repository.CampaignRepository campaignRepository;
+    private final CloudinaryUploadValidator cloudinaryUploadValidator;
 
     public ViewerTaskController(ViewerTaskFlowService viewerTaskFlowService, JwtUtil jwtUtil,
                                 TaskRepository taskRepository, ViewerTaskEntityRepository viewerTaskEntityRepository,
                                 EarningRepository earningRepository, ViewerWalletService viewerWalletService,
                                 com.growearn.repository.CampaignRepository campaignRepository,
-                                TaskTimerService taskTimerService) {
+                                TaskTimerService taskTimerService,
+                                CloudinaryUploadValidator cloudinaryUploadValidator) {
         this.viewerTaskFlowService = viewerTaskFlowService;
         this.taskTimerService = taskTimerService;
         this.jwtUtil = jwtUtil;
@@ -48,6 +50,7 @@ public class ViewerTaskController {
         this.earningRepository = earningRepository;
         this.viewerWalletService = viewerWalletService;
         this.campaignRepository = campaignRepository;
+        this.cloudinaryUploadValidator = cloudinaryUploadValidator;
     }
 
     /**
@@ -74,6 +77,11 @@ public class ViewerTaskController {
             }
             if (request.getProofUrl() == null || request.getProofUrl().trim().isEmpty()) {
                 return Map.of("success", false, "message", "Proof URL is required");
+            }
+            try {
+                cloudinaryUploadValidator.validate(request.getProofMimeType(), request.getProofSizeBytes());
+            } catch (IllegalArgumentException ex) {
+                return Map.of("success", false, "message", ex.getMessage());
             }
 
             logger.info("Task submission received from viewer {}: taskId={}, proofUrl={}", 
@@ -279,9 +287,20 @@ public class ViewerTaskController {
                 String proofText = body.containsKey("proofText") ? String.valueOf(body.get("proofText")) : null;
                 String deviceFingerprint = req.getHeader("X-Device-Fingerprint");
                 String ipAddress = extractIpAddress(req);
+                String proofMimeType = body.containsKey("proofMimeType") ? String.valueOf(body.get("proofMimeType")) : null;
+                Long proofSizeBytes = null;
+                if (body.containsKey("proofSizeBytes") && body.get("proofSizeBytes") != null) {
+                    proofSizeBytes = Long.valueOf(String.valueOf(body.get("proofSizeBytes")));
+                }
 
                 logger.info("Task submission with proof: taskId={}, viewerId={}, proofUrl={}", 
                            taskId, viewerId, proofUrl);
+
+                try {
+                    cloudinaryUploadValidator.validate(proofMimeType, proofSizeBytes);
+                } catch (IllegalArgumentException ex) {
+                    return Map.of("success", false, "message", ex.getMessage());
+                }
 
                 // Use new verification pipeline
                 return viewerTaskFlowService.submitTaskWithProof(

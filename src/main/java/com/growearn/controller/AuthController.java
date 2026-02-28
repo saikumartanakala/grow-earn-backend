@@ -31,7 +31,6 @@ import jakarta.validation.ConstraintViolationException;
 
 @RestController
 @RequestMapping("/api/auth")
-@CrossOrigin(origins = {"http://localhost:5173", "http://192.168.55.104:5173"}, allowCredentials = "true")
 
 public class AuthController {
 

@@ -6,13 +6,14 @@ import com.growearn.service.ViewerTaskFlowService;
 import com.growearn.service.ViewerWalletService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.List;
 
 /**
  * Scheduled job to automatically release payments for tasks in HOLD status
@@ -58,32 +59,40 @@ public class PaymentReleaseJob {
         logger.info("Running PaymentReleaseJob - checking for tasks ready for payment");
 
         try {
-        // Find all tasks in ON_HOLD status where hold period has expired
-        List<ViewerTaskEntity> heldTasks = viewerTaskRepository.findByStatus("ON_HOLD");
             LocalDateTime now = LocalDateTime.now();
             int processedCount = 0;
             int paidCount = 0;
 
-            for (ViewerTaskEntity task : heldTasks) {
-                processedCount++;
-                
-                // Check if hold period has expired
-                LocalDateTime holdEndTime = task.getHoldEndTime();
-        if (holdEndTime != null && holdEndTime.isBefore(now)) {
-            try {
-                // Mark task as paid and process payment
-                boolean success = markTaskPaid(task);
-                        if (success) {
-                            paidCount++;
-                            logger.info("Released payment for task {} (viewer: {})", 
-                                      task.getId(), task.getViewerId());
+            int page = 0;
+            int size = 200;
+            Page<ViewerTaskEntity> heldTasks;
+
+            do {
+                heldTasks = viewerTaskRepository.findByStatus("ON_HOLD", PageRequest.of(page, size));
+
+                for (ViewerTaskEntity task : heldTasks.getContent()) {
+                    processedCount++;
+
+                    // Check if hold period has expired
+                    LocalDateTime holdEndTime = task.getHoldEndTime();
+                    if (holdEndTime != null && holdEndTime.isBefore(now)) {
+                        try {
+                            // Mark task as paid and process payment
+                            boolean success = markTaskPaid(task);
+                            if (success) {
+                                paidCount++;
+                                logger.info("Released payment for task {} (viewer: {})",
+                                          task.getId(), task.getViewerId());
+                            }
+                        } catch (Exception e) {
+                            logger.error("Error releasing payment for task {}: {}",
+                                       task.getId(), e.getMessage(), e);
                         }
-                    } catch (Exception e) {
-                        logger.error("Error releasing payment for task {}: {}", 
-                                   task.getId(), e.getMessage(), e);
                     }
                 }
-            }
+
+                page++;
+            } while (heldTasks.hasNext());
 
             logger.info("PaymentReleaseJob completed. Processed: {}, Paid: {}", processedCount, paidCount);
 
