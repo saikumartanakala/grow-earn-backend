@@ -1,0 +1,12 @@
+**/target
+**/.mvn
+**/.idea
+**/.vscode
+**/.git
+**/.gitignore
+**/*.log
+**/*.iml
+**/node_modules
+**/dist
+**/build
+**/.DS_Store

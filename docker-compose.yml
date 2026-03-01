@@ -1,0 +1,35 @@
+services:
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: grow_earn
+      MYSQL_USER: growearn_user
+      MYSQL_PASSWORD: secure_password_123
+      MYSQL_ROOT_PASSWORD: root_password_123
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "5000:5000"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/grow_earn?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      SPRING_DATASOURCE_USERNAME: growearn_user
+      SPRING_DATASOURCE_PASSWORD: secure_password_123
+      JWT_SECRET: YourSuperSecureRandomKeyHere12345678901234567890
+
+volumes:
+  mysql_data:
