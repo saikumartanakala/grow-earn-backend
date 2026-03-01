@@ -40,6 +40,5 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           
           script: |
-            export KUBECONFIG=/home/ubuntu/.kube/config
             kubectl set image deployment/backend backend=${{ secrets.DOCKER_USERNAME }}/backend:${{ github.sha }}
             kubectl rollout status deployment/backend
