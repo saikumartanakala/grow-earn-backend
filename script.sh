@@ -28,5 +28,7 @@ cd grow-earn-backend-java
 # Run Maven to install dependencies
 ./mvnw clean install
 
+#check one
+
 # Print completion message
 echo "All dependencies installed successfully!"
