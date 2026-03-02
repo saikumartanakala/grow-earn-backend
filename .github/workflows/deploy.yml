@@ -41,5 +41,4 @@ jobs:
           
           script: |
             kubectl set image deployment/backend backend=${{ secrets.DOCKER_USERNAME }}/backend:${{ github.sha }}
-            kubectl rollout status deployment/backend
-#check
+            kubectl rollout status deployment/backend --timeout=120s || kubectl describe pods
